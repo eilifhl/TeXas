@@ -5168,6 +5168,7 @@ dependencies = [
  "gpui",
  "serde",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

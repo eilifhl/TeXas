@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+uuid = "1.23.1"
 gpui = "0.2.2"
 serde = "1.0.228"
 tokio = "1.52.3"
