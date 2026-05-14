@@ -7,18 +7,22 @@ use std::{
 };
 
 use eframe::egui::{
-    self, Align, CentralPanel, Color32, Context, FontFamily, FontId, Frame, Layout, Margin,
-    RichText, ScrollArea, SidePanel, Stroke, TextEdit, TopBottomPanel, Vec2,
+    self, Align, CentralPanel, Color32, Context, CornerRadius, FontFamily, FontId, Frame,
+    Layout, Margin, RichText, ScrollArea, SidePanel, Stroke, TextEdit, TopBottomPanel, Vec2,
 };
 
 const CARBON_BLUE_60: Color32 = Color32::from_rgb(15, 98, 254);
-const CARBON_BLUE_10: Color32 = Color32::from_rgb(237, 245, 255);
-const CARBON_GRAY_10: Color32 = Color32::from_rgb(247, 247, 247);
-const CARBON_GRAY_20: Color32 = Color32::from_rgb(238, 238, 238);
-const CARBON_GRAY_30: Color32 = Color32::from_rgb(198, 198, 198);
-const CARBON_GRAY_50: Color32 = Color32::from_rgb(141, 141, 141);
+const CARBON_BLUE_80: Color32 = Color32::from_rgb(69, 137, 255);
+const CARBON_GRAY_100: Color32 = Color32::from_rgb(22, 22, 22);
+const CARBON_GRAY_80: Color32 = Color32::from_rgb(57, 57, 57);
+const CARBON_GRAY_70: Color32 = Color32::from_rgb(82, 82, 82);
 const CARBON_GRAY_60: Color32 = Color32::from_rgb(109, 109, 109);
+const CARBON_GRAY_30: Color32 = Color32::from_rgb(198, 198, 198);
+const CARBON_GRAY_10: Color32 = Color32::from_rgb(244, 244, 244);
 const CARBON_GRAY_90: Color32 = Color32::from_rgb(38, 38, 38);
+const CARBON_GRAY_20: Color32 = Color32::from_rgb(238, 238, 238);
+const GOV_UK_BLACK: Color32 = Color32::from_rgb(11, 12, 12);
+const GOV_UK_WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -33,53 +37,104 @@ fn main() -> eframe::Result<()> {
         "TeXas",
         options,
         Box::new(|cc| {
-            configure_theme(&cc.egui_ctx);
+            configure_theme(&cc.egui_ctx, ThemeMode::Dark);
             Ok(Box::new(LatexEditorApp::default()))
         }),
     )
 }
 
-fn configure_theme(ctx: &Context) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ThemeMode {
+    Light,
+    Dark,
+}
+
+fn configure_theme(ctx: &Context, theme_mode: ThemeMode) {
     let mut style = (*ctx.style()).clone();
 
-    style.visuals = egui::Visuals::light();
-    style.visuals.window_fill = CARBON_GRAY_10;
-    style.visuals.panel_fill = CARBON_GRAY_10;
-    style.visuals.extreme_bg_color = Color32::from_rgb(255, 255, 255);
-    style.visuals.code_bg_color = Color32::from_rgb(243, 243, 243);
-    style.visuals.faint_bg_color = CARBON_GRAY_20;
-    style.visuals.widgets.noninteractive.bg_fill = CARBON_GRAY_10;
-    style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(255, 255, 255);
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(242, 244, 248);
-    style.visuals.widgets.active.bg_fill = CARBON_BLUE_10;
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARBON_GRAY_30);
-    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, CARBON_BLUE_60);
-    style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, CARBON_BLUE_60);
-    style.visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(218, 218, 218));
-    style.visuals.selection.bg_fill = Color32::from_rgb(210, 226, 255);
-    style.visuals.selection.stroke = Stroke::new(1.0, CARBON_BLUE_60);
+    style.visuals = match theme_mode {
+        ThemeMode::Light => egui::Visuals::light(),
+        ThemeMode::Dark => egui::Visuals::dark(),
+    };
 
-    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-    style.spacing.button_padding = Vec2::new(12.0, 8.0);
-    style.spacing.menu_margin = Margin::same(10);
-    style.spacing.window_margin = Margin::same(16);
+    match theme_mode {
+        ThemeMode::Light => {
+            style.visuals.window_fill = CARBON_GRAY_10;
+            style.visuals.panel_fill = CARBON_GRAY_10;
+            style.visuals.override_text_color = Some(GOV_UK_BLACK);
+            style.visuals.extreme_bg_color = GOV_UK_WHITE;
+            style.visuals.code_bg_color = GOV_UK_WHITE;
+            style.visuals.faint_bg_color = CARBON_GRAY_20;
+            style.visuals.widgets.noninteractive.bg_fill = CARBON_GRAY_10;
+            style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, GOV_UK_BLACK);
+            style.visuals.widgets.inactive.bg_fill = GOV_UK_WHITE;
+            style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, GOV_UK_BLACK);
+            style.visuals.widgets.hovered.bg_fill = CARBON_GRAY_10;
+            style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, GOV_UK_BLACK);
+            style.visuals.widgets.active.bg_fill = CARBON_GRAY_20;
+            style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, GOV_UK_BLACK);
+            style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARBON_GRAY_30);
+            style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, CARBON_BLUE_60);
+            style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, CARBON_BLUE_60);
+            style.visuals.window_stroke = Stroke::new(1.0, CARBON_GRAY_30);
+            style.visuals.selection.bg_fill = Color32::from_rgb(210, 226, 255);
+            style.visuals.selection.stroke = Stroke::new(1.0, CARBON_BLUE_60);
+        }
+        ThemeMode::Dark => {
+            style.visuals.window_fill = CARBON_GRAY_100;
+            style.visuals.panel_fill = CARBON_GRAY_100;
+            style.visuals.override_text_color = Some(GOV_UK_WHITE);
+            style.visuals.extreme_bg_color = CARBON_GRAY_90;
+            style.visuals.code_bg_color = CARBON_GRAY_90;
+            style.visuals.faint_bg_color = CARBON_GRAY_80;
+            style.visuals.widgets.noninteractive.bg_fill = CARBON_GRAY_100;
+            style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, CARBON_GRAY_10);
+            style.visuals.widgets.inactive.bg_fill = CARBON_GRAY_90;
+            style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, GOV_UK_WHITE);
+            style.visuals.widgets.hovered.bg_fill = CARBON_GRAY_80;
+            style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, GOV_UK_WHITE);
+            style.visuals.widgets.active.bg_fill = CARBON_GRAY_70;
+            style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, GOV_UK_WHITE);
+            style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CARBON_GRAY_30);
+            style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, CARBON_BLUE_80);
+            style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, CARBON_BLUE_80);
+            style.visuals.window_stroke = Stroke::new(1.0, CARBON_GRAY_30);
+            style.visuals.selection.bg_fill = CARBON_BLUE_60;
+            style.visuals.selection.stroke = Stroke::new(1.0, CARBON_BLUE_80);
+        }
+    }
+
+    style.visuals.window_corner_radius = CornerRadius::ZERO;
+    style.visuals.menu_corner_radius = CornerRadius::ZERO;
+    style.visuals.window_shadow = eframe::epaint::Shadow::NONE;
+    style.visuals.popup_shadow = eframe::epaint::Shadow::NONE;
+    style.visuals.widgets.noninteractive.corner_radius = CornerRadius::ZERO;
+    style.visuals.widgets.inactive.corner_radius = CornerRadius::ZERO;
+    style.visuals.widgets.hovered.corner_radius = CornerRadius::ZERO;
+    style.visuals.widgets.active.corner_radius = CornerRadius::ZERO;
+    style.visuals.widgets.open.corner_radius = CornerRadius::ZERO;
+
+    style.spacing.item_spacing = Vec2::new(8.0, 8.0);
+    style.spacing.button_padding = Vec2::new(10.0, 7.0);
+    style.spacing.menu_margin = Margin::same(8);
+    style.spacing.window_margin = Margin::same(12);
 
     style.text_styles = [
         (
             egui::TextStyle::Heading,
-            FontId::new(26.0, FontFamily::Proportional),
+            FontId::new(24.0, FontFamily::Proportional),
         ),
         (
             egui::TextStyle::Body,
-            FontId::new(16.0, FontFamily::Proportional),
-        ),
-        (
-            egui::TextStyle::Button,
             FontId::new(15.0, FontFamily::Proportional),
         ),
         (
+            egui::TextStyle::Button,
+            FontId::new(14.0, FontFamily::Proportional),
+        ),
+        (
             egui::TextStyle::Small,
-            FontId::new(13.0, FontFamily::Proportional),
+            FontId::new(12.0, FontFamily::Proportional),
         ),
         (
             egui::TextStyle::Monospace,
@@ -95,6 +150,7 @@ struct LatexEditorApp {
     editor_text: String,
     build_output: String,
     last_pdf_path: Option<PathBuf>,
+    theme_mode: ThemeMode,
 }
 
 impl Default for LatexEditorApp {
@@ -103,6 +159,7 @@ impl Default for LatexEditorApp {
             editor_text: SAMPLE_DOCUMENT.to_owned(),
             build_output: "No build output yet.".to_owned(),
             last_pdf_path: None,
+            theme_mode: ThemeMode::Dark,
         }
     }
 }
@@ -131,35 +188,72 @@ impl LatexEditorApp {
         }
     }
 
+    fn toggle_theme(&mut self, ctx: &Context) {
+        self.theme_mode = match self.theme_mode {
+            ThemeMode::Light => ThemeMode::Dark,
+            ThemeMode::Dark => ThemeMode::Light,
+        };
+        configure_theme(ctx, self.theme_mode);
+    }
+
 }
 
 impl eframe::App for LatexEditorApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        let (panel_fill, surface_fill, title_color, label_color, editor_text_color) =
+            match self.theme_mode {
+                ThemeMode::Light => (
+                    GOV_UK_WHITE,
+                    GOV_UK_WHITE,
+                    GOV_UK_BLACK,
+                    CARBON_GRAY_60,
+                    GOV_UK_BLACK,
+                ),
+                ThemeMode::Dark => (
+                    CARBON_GRAY_90,
+                    CARBON_GRAY_100,
+                    GOV_UK_WHITE,
+                    CARBON_GRAY_10,
+                    GOV_UK_WHITE,
+                ),
+            };
+
         TopBottomPanel::top("top_bar")
-            .exact_height(72.0)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_rgb(255, 255, 255))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(218, 218, 218)))
-                    .inner_margin(Margin::symmetric(20, 16)),
+                    .fill(panel_fill)
+                    .stroke(Stroke::new(1.0, CARBON_GRAY_30))
+                    .inner_margin(Margin::symmetric(14, 12)),
             )
             .show(ctx, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new("TeXas")
-                                .size(28.0)
+                                .size(22.0)
                                 .strong()
-                                .color(CARBON_GRAY_90),
+                                .color(title_color),
                         );
                     });
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let open_pdf = ui.add_enabled(
-                            self.last_pdf_path.is_some(),
-                            egui::Button::new("Open PDF"),
-                        );
-                        if open_pdf.clicked() {
+                        if ui
+                            .add_sized(
+                                [112.0, 36.0],
+                                egui::Button::new(match self.theme_mode {
+                                    ThemeMode::Light => "Dark mode",
+                                    ThemeMode::Dark => "Light mode",
+                                }),
+                            )
+                            .clicked()
+                        {
+                            self.toggle_theme(ctx);
+                        }
+
+                        let open_pdf = ui.add_enabled_ui(self.last_pdf_path.is_some(), |ui| {
+                            ui.add_sized([112.0, 36.0], egui::Button::new("Open PDF"))
+                        });
+                        if open_pdf.inner.clicked() {
                             self.open_pdf();
                         }
 
@@ -179,22 +273,22 @@ impl eframe::App for LatexEditorApp {
             .min_width(240.0)
             .frame(
                 Frame::new()
-                    .fill(Color32::from_rgb(252, 252, 252))
+                    .fill(panel_fill)
                     .stroke(Stroke::new(1.0, CARBON_GRAY_30))
-                    .inner_margin(Margin::same(16)),
+                    .inner_margin(Margin::same(12)),
             )
             .show(ctx, |ui| {
                 ui.label(
                     RichText::new("Build output")
-                        .size(14.0)
+                        .size(13.0)
                         .strong()
-                        .color(CARBON_GRAY_60),
+                        .color(label_color),
                 );
                 ui.add_space(4.0);
 
                 let output_height = ui.available_height();
                 Frame::new()
-                    .fill(Color32::from_rgb(255, 255, 255))
+                    .fill(surface_fill)
                     .stroke(Stroke::new(1.0, CARBON_GRAY_30))
                     .inner_margin(Margin::same(10))
                     .show(ui, |ui| {
@@ -206,7 +300,7 @@ impl eframe::App for LatexEditorApp {
                                     RichText::new(&self.build_output)
                                         .small()
                                         .monospace()
-                                        .color(CARBON_GRAY_90),
+                                        .color(editor_text_color),
                                 );
                             });
                     });
@@ -215,30 +309,23 @@ impl eframe::App for LatexEditorApp {
         CentralPanel::default()
             .frame(
                 Frame::new()
-                    .fill(CARBON_GRAY_10)
-                    .inner_margin(Margin::same(18)),
+                    .fill(surface_fill)
+                    .inner_margin(Margin::same(12)),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("main.tex")
-                            .size(18.0)
-                            .strong()
-                            .color(CARBON_GRAY_90),
-                    );
-                    ui.label(
-                        RichText::new("Draft")
-                            .small()
-                            .color(CARBON_GRAY_50),
-                    );
-                });
-                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("main.tex")
+                        .size(16.0)
+                        .strong()
+                        .color(title_color),
+                );
+                ui.add_space(8.0);
 
                 let editor_height = ui.available_height();
                 Frame::new()
-                    .fill(Color32::from_rgb(255, 255, 255))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(198, 198, 198)))
-                    .inner_margin(Margin::same(18))
+                    .fill(panel_fill)
+                    .stroke(Stroke::new(1.0, CARBON_GRAY_30))
+                    .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.set_min_height(editor_height);
                         TextEdit::multiline(&mut self.editor_text)
@@ -247,6 +334,7 @@ impl eframe::App for LatexEditorApp {
                             .min_size(ui.available_size())
                             .font(egui::TextStyle::Monospace)
                             .hint_text("Start writing LaTeX here...")
+                            .text_color(editor_text_color)
                             .show(ui);
                     });
             });
