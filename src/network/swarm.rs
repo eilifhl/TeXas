@@ -5,9 +5,13 @@ use libp2p::{
   yamux,
   tcp,
   ping,
+  mdns,
   noise,
+  gossipsub,
   swarm::SwarmEvent,
 };
+
+use crate::network::texas_behaviour::TexasBehaviour;
 
 pub async fn start() -> Result<(), Box<dyn Error>> {
   let mut swarm = libp2p::SwarmBuilder::with_new_identity()
@@ -17,7 +21,23 @@ pub async fn start() -> Result<(), Box<dyn Error>> {
       noise::Config::new,
       yamux::Config::default,
     )?
-    .with_behaviour(|_| ping::Behaviour::default())?
+    .with_behaviour(|key| {
+      let peer_id = key.public().to_peer_id();
+
+      let ping = ping::Behaviour::default();
+
+      let mdns = mdns::tokio::Behaviour::new(
+        mdns::Config::default(),
+        peer_id,
+      )?;
+
+      let gossipsub = gossipsub::Behaviour::new(
+        gossipsub::MessageAuthenticity::Signed(key.clone()),
+        gossipsub::Config::default(),
+      )?;
+
+      Ok(TexasBehaviour{ping, mdns, gossipsub})
+    })?
     .build();
 
   let peer_id = swarm.local_peer_id();
