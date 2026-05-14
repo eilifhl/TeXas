@@ -1,20 +1,15 @@
 use std::error::Error;
+use libp2p::futures::StreamExt;
 
 use libp2p::{
-  identity,
-  PeerId,
   yamux,
   tcp,
   ping,
   noise,
+  swarm::SwarmEvent,
 };
 
 pub async fn start() -> Result<(), Box<dyn Error>> {
-  //let key_pair = identity::Keypair::generate_ed25519();
-  //let peer_id = PeerId::from(key_pair.public());
-
-  //println!("local peer id: {peer_id}");
-  
   let mut swarm = libp2p::SwarmBuilder::with_new_identity()
     .with_tokio()
     .with_tcp(
@@ -28,5 +23,13 @@ pub async fn start() -> Result<(), Box<dyn Error>> {
   let peer_id = swarm.local_peer_id();
   println!("local peer id: {peer_id}");
 
-  Ok(())
+  swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+
+  loop {
+    match swarm.select_next_some().await {
+      SwarmEvent::NewListenAddr { address, .. } => println!("Listening on {address:?}"),
+      SwarmEvent::Behaviour(event) => println!("{event:?}"),
+      _ => {}
+    }
+  }
 }
