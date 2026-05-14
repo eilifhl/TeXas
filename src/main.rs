@@ -130,6 +130,7 @@ impl LatexEditorApp {
             }
         }
     }
+
 }
 
 impl eframe::App for LatexEditorApp {
@@ -172,38 +173,6 @@ impl eframe::App for LatexEditorApp {
                 });
             });
 
-        TopBottomPanel::bottom("status_bar")
-            .exact_height(34.0)
-            .frame(
-                Frame::new()
-                    .fill(Color32::from_rgb(255, 255, 255))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(218, 218, 218)))
-                    .inner_margin(Margin::symmetric(16, 8)),
-            )
-            .show(ctx, |ui| {
-                ui.columns(3, |columns| {
-                    columns[0].label(
-                        RichText::new("Local draft")
-                            .small()
-                            .color(CARBON_GRAY_60),
-                    );
-                    columns[1].with_layout(Layout::top_down(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new("UTF-8  |  XeLaTeX  |  Synced")
-                                .small()
-                                .color(CARBON_GRAY_60),
-                        );
-                    });
-                    columns[2].with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new("Ln 18, Col 7")
-                                .small()
-                                .color(CARBON_GRAY_60),
-                        );
-                    });
-                });
-            });
-
         SidePanel::right("meta_panel")
             .resizable(true)
             .default_width(290.0)
@@ -215,21 +184,6 @@ impl eframe::App for LatexEditorApp {
                     .inner_margin(Margin::same(16)),
             )
             .show(ctx, |ui| {
-                ui.label(
-                    RichText::new("Document")
-                        .size(14.0)
-                        .strong()
-                        .color(CARBON_GRAY_60),
-                );
-                ui.add_space(6.0);
-                ui.label(RichText::new("Article template").size(20.0).strong());
-                ui.label(
-                    RichText::new("Single-file drafting surface with compile feedback.")
-                        .color(CARBON_GRAY_60),
-                );
-                ui.add_space(18.0);
-                ui.separator();
-                ui.add_space(10.0);
                 ui.label(
                     RichText::new("Build output")
                         .size(14.0)
@@ -287,12 +241,13 @@ impl eframe::App for LatexEditorApp {
                     .inner_margin(Margin::same(18))
                     .show(ui, |ui| {
                         ui.set_min_height(editor_height);
-                        ui.add_sized(
-                            [ui.available_width(), ui.available_height()],
-                            TextEdit::multiline(&mut self.editor_text)
-                                .font(egui::TextStyle::Monospace)
-                                .hint_text("Start writing LaTeX here..."),
-                        );
+                        TextEdit::multiline(&mut self.editor_text)
+                            .desired_width(ui.available_width())
+                            .desired_rows(30)
+                            .min_size(ui.available_size())
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("Start writing LaTeX here...")
+                            .show(ui);
                     });
             });
     }
