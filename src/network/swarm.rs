@@ -77,7 +77,7 @@ fn handle_mdns_event(event: mdns::Event, gossipsub: &mut gossipsub::Behaviour) {
 
     mdns::Event::Expired(list) => {
       for (peer_id, _addr) in list {
-        println!("Lost connection to peer: {peer_id}");
+        println!("mDNS expired peer: {peer_id}");
         gossipsub.remove_explicit_peer(&peer_id);
       }
     }
