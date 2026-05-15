@@ -14,15 +14,15 @@ impl TextElement {
         self.id
     }
 
-    pub fn position(&self) -> Position {
-        self.position
+    pub fn position(&self) -> &Position {
+        &self.position
     }
 }
 
 impl TextElement {
-    pub fn new(replica_id: Uuid, counter: Timestamp, index: usize, value: char) -> Self {
+    pub fn new(id: ElementId, position: Position, value: char) -> Self {
         Self {
-            id: ElementId::new(replica_id, counter),
+            id,
             position,
             value,
             deleted: false,
@@ -30,10 +30,11 @@ impl TextElement {
     }
 }
 
+
 // if replica_id = 'A'
 // Insert 'H' -> clock becomes 1 -> element id = (A, 1)
 // Insert 'i' -> clock becomes 2 -> element id = (A, 2)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct ElementId {
     replica_id: Uuid,
     counter: Timestamp,

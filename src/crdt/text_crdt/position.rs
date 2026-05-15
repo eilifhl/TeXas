@@ -7,7 +7,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct Position(Vec<PositionComponent>);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PositionComponent {
     // the digit is where in the text we are.
     // If you want to insert between 10 and 20, you can choose 15:

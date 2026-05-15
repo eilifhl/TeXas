@@ -10,3 +10,14 @@ impl Timestamp {
         Self(self.0 + 1)
     }
 }
+
+#[test]
+fn test_timestamp() {
+    let mut timestamp = Timestamp::zero();
+
+    assert_eq!(timestamp.0, 0);
+
+    timestamp = timestamp.next();
+
+    assert_eq!(timestamp.0, 1)
+}
