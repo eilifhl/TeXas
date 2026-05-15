@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use uuid::Uuid;
-use crate::crdt::text_crdt::{OperationId, TextElement, TextOperation};
+use crate::crdt::text_crdt::{ElementId, OperationId, TextElement, TextOperation};
 use crate::crdt::text_crdt::timestamp::Timestamp;
 
 pub struct TextCrdt {
@@ -23,7 +23,13 @@ impl TextCrdt {
     // Insertions and deletions create TextOperations that we apply locally
     // and send over the network to other peers.
     pub fn insert(&mut self, index: usize, value: char) -> TextOperation {
-        let op = todo!("Implement");
+        let text_element = TextElement::new(self.replica_id, self.clock, index, value);
+        let op = TextOperation::Insert {
+            op_id: OperationId::new(self.replica_id, self.clock),
+            element_id: text_element.id(),
+            position: text_element.position(),
+            value,
+        };
         self.apply(op.clone());
         op
     }
