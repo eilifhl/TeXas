@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 use uuid::Uuid;
 use crate::crdt::text_crdt::{OperationId, TextElement, TextOperation};
+use crate::crdt::text_crdt::timestamp::Timestamp;
 
 pub struct TextCrdt {
     replica_id: Uuid,
-    clock: u64, // to make the IDs, see `ElementId` struct
+    clock: Timestamp, // to make the IDs, see `ElementId` struct
     elements: Vec<TextElement>, // contains the text elements that create the text
     seen_operations: HashSet<OperationId>,
 }
@@ -13,14 +14,18 @@ impl TextCrdt {
     pub fn new(replica_id: Uuid) -> Self {
         Self {
             replica_id,
-            clock: 0,
-            elements: vec![],
+            clock: Timestamp::zero(),
+            elements: Vec::new(),
             seen_operations: HashSet::new(),
         }
     }
 
+    // Insertions and deletions create TextOperations that we apply locally
+    // and send over the network to other peers.
     pub fn insert(&mut self, index: usize, value: char) -> TextOperation {
-        todo!("Implement")
+        let op = todo!("Implement");
+        self.apply(op.clone());
+        op
     }
     pub fn delete(&mut self, index: usize) -> Option<TextOperation> {
         todo!("Implement")

@@ -2,6 +2,7 @@ mod text_crdt;
 mod position;
 mod operation;
 mod element;
+mod timestamp;
 
 pub use element::{ElementId, TextElement};
 pub use operation::{OperationId, TextOperation};

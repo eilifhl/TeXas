@@ -1,1 +1,1 @@
-mod text_crdt;
+pub mod text_crdt;
