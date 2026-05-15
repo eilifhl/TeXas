@@ -9,5 +9,5 @@ pub struct PositionComponent {
     // the digit is where in the text we are.
     // If you want to insert between 10 and 20, you can choose 15:
     digit: u32,
-    timestamp: Timestamp, // for tiebreaks: LWW. maybe use another datatype for it
+    timestamp: Timestamp, // for tiebreaks: LWW. fixme: maybe use another datatype for it
 }
