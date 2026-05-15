@@ -1,3 +1,5 @@
+pub mod crdt;
+
 use std::{
     env,
     fs,
