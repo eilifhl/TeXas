@@ -1,5 +1,5 @@
-use uuid::Uuid;
 use crate::crdt::text_crdt::timestamp::Timestamp;
+use uuid::Uuid;
 
 // position is a lexicographically ordered path.
 // a short path like [10] can be extended to [10, 500] when there is
