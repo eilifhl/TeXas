@@ -28,13 +28,20 @@ impl TextElement {
             deleted: false,
         }
     }
-}
 
+    pub fn mark_deleted(&mut self) {
+        self.deleted = true;
+    }
+
+    pub fn deleted(&self) -> bool {
+        self.deleted
+    }
+}
 
 // if replica_id = 'A'
 // Insert 'H' -> clock becomes 1 -> element id = (A, 1)
 // Insert 'i' -> clock becomes 2 -> element id = (A, 2)
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub struct ElementId {
     replica_id: Uuid,
     counter: Timestamp,
