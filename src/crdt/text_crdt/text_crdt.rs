@@ -25,8 +25,8 @@ impl TextCrdt {
     pub fn insert(&mut self, index: usize, value: char) -> TextOperation {
         self.clock = self.clock.next();
 
-        let element_id = ElementId::new(self.replica_id, self.clock);
         let op_id = OperationId::new(self.replica_id, self.clock);
+        let element_id = ElementId::new(self.replica_id, self.clock);
 
         let position = self.position_for_insert(index);
 
@@ -43,11 +43,41 @@ impl TextCrdt {
     }
 
     pub fn delete(&mut self, index: usize) -> Option<TextOperation> {
-        todo!("Implement")
+        let op_id = OperationId::new(self.replica_id, self.clock);
+        let element_id = todo!("Retrieve element_id from index");
+
+        let op = TextOperation::Delete { op_id, element_id };
+
+        self.apply(op.clone());
+
+        Some(op)
     }
 
     pub fn apply(&mut self, op: TextOperation) {
-        todo!("Implement")
+        match op {
+            TextOperation::Insert {
+                op_id,
+                element_id,
+                position,
+                value,
+            } => {
+                if self.seen_operations.contains(&op_id) {
+                    // already applied operation; return early
+                    return;
+                }
+
+                self.seen_operations.insert(op_id);
+
+                self.elements
+                    .push(TextElement::new(element_id, position, value));
+
+                self.elements.sort_by(|a, b| a.position().cmp(b.position()));
+            }
+
+            TextOperation::Delete { .. } => {
+                todo!("Implement")
+            }
+        }
     }
     pub fn value(&self) -> String {
         todo!("Implement")
