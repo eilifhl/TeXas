@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::{ElementId, Position};
 use uuid::Uuid;
@@ -17,7 +18,7 @@ impl OperationId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TextOperation {
     Insert {
         op_id: OperationId,
