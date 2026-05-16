@@ -45,10 +45,12 @@ impl TextCrdt {
     }
 
     pub fn delete(&mut self, index: usize) -> Option<TextOperation> {
-        self.clock = self.clock.next();
-
-        let op_id = OperationId::new(self.replica_id, self.clock);
+        // we do this first so we don't increment clock and add a new operation
+        // for an invalid element
         let element_id = self.element_id_from_index(index)?;
+
+        self.clock = self.clock.next();
+        let op_id = OperationId::new(self.replica_id, self.clock);
 
         let op = TextOperation::Delete { op_id, element_id };
 
@@ -107,30 +109,31 @@ impl TextCrdt {
     }
 
     fn neighbors_for_insert(&self, index: usize) -> (Option<ElementId>, Option<ElementId>) {
-        let visible_elements = self.visible_elements();
+        let mut left_neighbor = None;
+        let mut visible_index = 0;
 
-        let left_neighbor = index
-            .checked_sub(1)
-            .and_then(|left_index| visible_elements.get(left_index))
-            .map(|element| element.id());
+        for element in self
+            .ordered_elements()
+            .into_iter()
+            .filter(|element| !element.deleted())
+        {
+            if visible_index == index {
+                return (left_neighbor, Some(element.id()));
+            }
 
-        let right_neighbor = visible_elements.get(index).map(|element| element.id());
+            left_neighbor = Some(element.id());
+            visible_index += 1;
+        }
 
-        (left_neighbor, right_neighbor)
+        (left_neighbor, None)
     }
 
     fn element_id_from_index(&self, index: usize) -> Option<ElementId> {
-        self.visible_elements()
-            .into_iter()
-            .nth(index)
-            .map(|element| element.id())
-    }
-
-    fn visible_elements(&self) -> Vec<&TextElement> {
         self.ordered_elements()
             .into_iter()
             .filter(|element| !element.deleted())
-            .collect()
+            .nth(index)
+            .map(|element| element.id())
     }
 
     fn ordered_elements(&self) -> Vec<&TextElement> {
