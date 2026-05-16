@@ -5,3 +5,4 @@ mod timestamp;
 
 pub use element::{ElementId, TextElement};
 pub use operation::{OperationId, TextOperation};
+pub use text_crdt::TextCrdt;
