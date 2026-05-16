@@ -448,10 +448,20 @@ fn concurrent_insertions_at_the_same_index_stay_in_runs() {
         b.apply(op);
     }
 
-    assert_eq!(a.value(), b.value());
-    assert!(a.value().contains(" Alice"));
-    assert!(a.value().contains(" Charlie"));
-    assert!(!a.value().contains("Al Ciharcliee"));
+    let value = a.value();
+    assert_eq!(value, b.value());
+    let alice_start = value
+        .find(" Alice")
+        .expect("final text should contain Alice as one contiguous run");
+    let charlie_start = value
+        .find(" Charlie")
+        .expect("final text should contain Charlie as one contiguous run");
+    let alice_end = alice_start + " Alice".len();
+    let charlie_end = charlie_start + " Charlie".len();
+    assert!(
+        alice_end <= charlie_start || charlie_end <= alice_start,
+        "Alice and Charlie runs should remain contiguous and non-overlapping: {value}"
+    );
 }
 
 #[test]
