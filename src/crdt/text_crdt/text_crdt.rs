@@ -4,6 +4,29 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
 
+struct PendingInsert {
+    element_id: ElementId,
+    left_neighbor: Option<ElementId>,
+    right_neighbor: Option<ElementId>,
+    value: char,
+}
+
+impl PendingInsert {
+    fn new(
+        element_id: ElementId,
+        left_neighbor: Option<ElementId>,
+        right_neighbor: Option<ElementId>,
+        value: char,
+    ) -> Self {
+        Self {
+            element_id,
+            left_neighbor,
+            right_neighbor,
+            value,
+        }
+    }
+}
+
 pub struct TextCrdt {
     replica_id: Uuid,
     clock: Timestamp,           // to make the IDs. See the `ElementId` struct
@@ -11,6 +34,7 @@ pub struct TextCrdt {
     ordered_element_indices: RefCell<Vec<usize>>,
     ordered_elements_dirty: Cell<bool>,
     seen_operations: HashSet<OperationId>,
+    pending_inserts: HashMap<ElementId, PendingInsert>,
     pending_deletes: HashSet<ElementId>,
     #[cfg(test)]
     ordered_elements_rebuilds: Cell<usize>,
@@ -25,6 +49,7 @@ impl TextCrdt {
             ordered_element_indices: RefCell::new(Vec::new()),
             ordered_elements_dirty: Cell::new(true),
             seen_operations: HashSet::new(),
+            pending_inserts: HashMap::new(),
             pending_deletes: HashSet::new(),
             #[cfg(test)]
             ordered_elements_rebuilds: Cell::new(0),
@@ -87,23 +112,21 @@ impl TextCrdt {
 
                 self.seen_operations.insert(op_id);
 
-                if self
-                    .elements
-                    .iter()
-                    .any(|element| element.id() == element_id)
+                if self.element_exists(element_id) || self.pending_inserts.contains_key(&element_id)
                 {
                     return;
                 }
 
-                let mut element =
-                    TextElement::new(element_id, left_neighbor, right_neighbor, value);
+                let pending_insert =
+                    PendingInsert::new(element_id, left_neighbor, right_neighbor, value);
 
-                if self.pending_deletes.remove(&element_id) {
-                    element.mark_deleted();
+                if !self.left_neighbor_exists(left_neighbor) {
+                    self.pending_inserts.insert(element_id, pending_insert);
+                    return;
                 }
 
-                self.elements.push(element);
-                self.invalidate_ordered_elements();
+                self.materialize_insert(pending_insert);
+                self.materialize_pending_inserts();
             }
 
             TextOperation::Delete { op_id, element_id } => {
@@ -127,6 +150,7 @@ impl TextCrdt {
             }
         }
     }
+
     pub fn value(&self) -> String {
         self.ordered_element_indices()
             .iter()
@@ -171,6 +195,55 @@ impl TextCrdt {
             .nth(index)
     }
 
+    fn element_exists(&self, element_id: ElementId) -> bool {
+        self.elements
+            .iter()
+            .any(|element| element.id() == element_id)
+    }
+
+    fn left_neighbor_exists(&self, left_neighbor: Option<ElementId>) -> bool {
+        match left_neighbor {
+            Some(element_id) => self.element_exists(element_id),
+            None => true,
+        }
+    }
+
+    fn materialize_insert(&mut self, pending_insert: PendingInsert) {
+        let mut element = TextElement::new(
+            pending_insert.element_id,
+            pending_insert.left_neighbor,
+            pending_insert.right_neighbor,
+            pending_insert.value,
+        );
+
+        if self.pending_deletes.remove(&pending_insert.element_id) {
+            element.mark_deleted();
+        }
+
+        self.elements.push(element);
+        self.invalidate_ordered_elements();
+    }
+
+    fn materialize_pending_inserts(&mut self) {
+        while let Some(element_id) =
+            self.pending_inserts
+                .iter()
+                .find_map(|(&element_id, pending_insert)| {
+                    self.left_neighbor_exists(pending_insert.left_neighbor)
+                        .then_some(element_id)
+                })
+        {
+            let pending_insert = self
+                .pending_inserts
+                .remove(&element_id)
+                .expect("pending insert exists");
+
+            if !self.element_exists(pending_insert.element_id) {
+                self.materialize_insert(pending_insert);
+            }
+        }
+    }
+
     fn ordered_element_indices(&self) -> Ref<'_, Vec<usize>> {
         if self.ordered_elements_dirty.get() {
             let ordered_element_indices = self.compute_ordered_element_indices();
@@ -208,25 +281,6 @@ impl TextCrdt {
         let mut visited = HashSet::new();
 
         self.append_children(None, &children_by_left_neighbor, &mut visited, &mut ordered);
-
-        let mut orphans: Vec<usize> = self
-            .elements
-            .iter()
-            .enumerate()
-            .filter(|(_, element)| !visited.contains(&element.id()))
-            .map(|(element_index, _)| element_index)
-            .collect();
-        orphans.sort_by_key(|&element_index| self.elements[element_index].id());
-
-        for orphan in orphans {
-            self.append_element(
-                orphan,
-                &children_by_left_neighbor,
-                &mut visited,
-                &mut ordered,
-            );
-        }
-
         ordered
     }
 
@@ -342,15 +396,24 @@ impl TextCrdt {
 
 #[test]
 fn text_crdt() {
-    let mut text_crdt = TextCrdt::new(Uuid::new_v4());
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(1));
+    let mut other = TextCrdt::new(Uuid::from_u128(2));
 
-    text_crdt.insert(0, 'A');
-    text_crdt.insert(1, 'B');
-    text_crdt.insert(2, 'C');
+    let insert_a = text_crdt.insert(0, 'A');
+    let insert_b = text_crdt.insert(1, 'B');
+    let insert_c = text_crdt.insert(2, 'C');
 
-    text_crdt.delete(1);
+    let delete_b = text_crdt
+        .delete(1)
+        .expect("inserted element should be deletable");
 
     assert_eq!(text_crdt.value(), "AC");
+
+    other.apply(insert_a);
+    other.apply(insert_c);
+    other.apply(insert_b);
+    other.apply(delete_b);
+    assert_eq!(other.value(), "AC");
 }
 
 #[test]
@@ -463,6 +526,127 @@ fn ordered_view_is_cached_between_mutations() {
     text_crdt.delete(0);
     assert_eq!(text_crdt.value(), "B");
     assert_eq!(text_crdt.ordered_elements_rebuilds.get(), 3);
+}
+
+#[test]
+fn insert_with_missing_left_neighbor_is_buffered_until_parent_arrives() {
+    let replica_id = Uuid::from_u128(1);
+    let parent_timestamp = Timestamp::zero().next();
+    let child_timestamp = parent_timestamp.next();
+    let parent_id = ElementId::new(replica_id, parent_timestamp);
+    let child_id = ElementId::new(replica_id, child_timestamp);
+
+    let parent = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, parent_timestamp),
+        element_id: parent_id,
+        left_neighbor: None,
+        right_neighbor: None,
+        value: 'A',
+    };
+    let child = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, child_timestamp),
+        element_id: child_id,
+        left_neighbor: Some(parent_id),
+        right_neighbor: None,
+        value: 'B',
+    };
+
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(2));
+
+    text_crdt.apply(child);
+
+    assert_eq!(text_crdt.elements.len(), 0);
+    assert_eq!(text_crdt.pending_inserts.len(), 1);
+    assert_eq!(text_crdt.value(), "");
+
+    text_crdt.apply(parent);
+
+    assert_eq!(text_crdt.elements.len(), 2);
+    assert_eq!(text_crdt.pending_inserts.len(), 0);
+    assert_eq!(text_crdt.value(), "AB");
+}
+
+#[test]
+fn delete_before_buffered_insert_tombstones_element_when_parent_arrives() {
+    let replica_id = Uuid::from_u128(1);
+    let parent_timestamp = Timestamp::zero().next();
+    let child_timestamp = parent_timestamp.next();
+    let delete_timestamp = child_timestamp.next();
+    let parent_id = ElementId::new(replica_id, parent_timestamp);
+    let child_id = ElementId::new(replica_id, child_timestamp);
+
+    let child = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, child_timestamp),
+        element_id: child_id,
+        left_neighbor: Some(parent_id),
+        right_neighbor: None,
+        value: 'B',
+    };
+    let delete_child = TextOperation::Delete {
+        op_id: OperationId::new(replica_id, delete_timestamp),
+        element_id: child_id,
+    };
+    let parent = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, parent_timestamp),
+        element_id: parent_id,
+        left_neighbor: None,
+        right_neighbor: None,
+        value: 'A',
+    };
+
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(2));
+
+    text_crdt.apply(child);
+    text_crdt.apply(delete_child);
+    text_crdt.apply(parent);
+
+    assert_eq!(text_crdt.elements.len(), 2);
+    assert_eq!(text_crdt.pending_inserts.len(), 0);
+    assert_eq!(text_crdt.value(), "A");
+}
+
+#[test]
+fn buffered_insert_chain_materializes_when_root_parent_arrives() {
+    let replica_id = Uuid::from_u128(1);
+    let first_timestamp = Timestamp::zero().next();
+    let second_timestamp = first_timestamp.next();
+    let third_timestamp = second_timestamp.next();
+    let first_id = ElementId::new(replica_id, first_timestamp);
+    let second_id = ElementId::new(replica_id, second_timestamp);
+    let third_id = ElementId::new(replica_id, third_timestamp);
+
+    let first = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, first_timestamp),
+        element_id: first_id,
+        left_neighbor: None,
+        right_neighbor: None,
+        value: 'A',
+    };
+    let second = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, second_timestamp),
+        element_id: second_id,
+        left_neighbor: Some(first_id),
+        right_neighbor: None,
+        value: 'B',
+    };
+    let third = TextOperation::Insert {
+        op_id: OperationId::new(replica_id, third_timestamp),
+        element_id: third_id,
+        left_neighbor: Some(second_id),
+        right_neighbor: None,
+        value: 'C',
+    };
+
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(2));
+
+    text_crdt.apply(third);
+    text_crdt.apply(second);
+    assert_eq!(text_crdt.value(), "");
+
+    text_crdt.apply(first);
+
+    assert_eq!(text_crdt.pending_inserts.len(), 0);
+    assert_eq!(text_crdt.value(), "ABC");
 }
 
 #[test]
