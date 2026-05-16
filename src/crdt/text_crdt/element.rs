@@ -2,6 +2,8 @@ use crate::crdt::text_crdt::timestamp::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextElement {
     id: ElementId,
     left_neighbor: Option<ElementId>,
@@ -10,19 +12,6 @@ pub struct TextElement {
     deleted: bool,
 }
 
-impl TextElement {
-    pub fn id(&self) -> ElementId {
-        self.id
-    }
-
-    pub fn left_neighbor(&self) -> Option<ElementId> {
-        self.left_neighbor
-    }
-
-    pub fn right_neighbor(&self) -> Option<ElementId> {
-        self.right_neighbor
-    }
-}
 
 impl TextElement {
     pub fn new(
@@ -38,6 +27,18 @@ impl TextElement {
             value,
             deleted: false,
         }
+    }
+
+    pub fn id(&self) -> ElementId {
+        self.id
+    }
+
+    pub fn left_neighbor(&self) -> Option<ElementId> {
+        self.left_neighbor
+    }
+
+    pub fn right_neighbor(&self) -> Option<ElementId> {
+        self.right_neighbor
     }
 
     pub fn mark_deleted(&mut self) {
