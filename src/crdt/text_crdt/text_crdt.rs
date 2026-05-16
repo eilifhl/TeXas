@@ -1,7 +1,6 @@
 use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::{ElementId, OperationId, TextElement, TextOperation};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
 
 pub struct TextCrdt {
@@ -157,8 +156,8 @@ impl TextCrdt {
                 .push(element);
         }
 
-        for children in children_by_left_neighbor.values_mut() {
-            children.sort_by(|a, b| Self::compare_siblings(a, b));
+        for siblings in children_by_left_neighbor.values_mut() {
+            Self::order_siblings(siblings);
         }
 
         let mut ordered = Vec::with_capacity(self.elements.len());
@@ -217,16 +216,70 @@ impl TextCrdt {
         );
     }
 
-    fn compare_siblings(a: &TextElement, b: &TextElement) -> Ordering {
-        if a.right_neighbor() == Some(b.id()) {
-            return Ordering::Less;
+    fn order_siblings(siblings: &mut Vec<&TextElement>) {
+        if siblings.len() < 2 {
+            return;
         }
 
-        if b.right_neighbor() == Some(a.id()) {
-            return Ordering::Greater;
+        let sibling_ids: HashSet<ElementId> = siblings.iter().map(|element| element.id()).collect();
+        let mut outgoing: HashMap<ElementId, Vec<ElementId>> = HashMap::new();
+        let mut incoming_counts: HashMap<ElementId, usize> =
+            sibling_ids.iter().map(|id| (*id, 0)).collect();
+
+        for element in siblings.iter() {
+            let id = element.id();
+            if let Some(right_neighbor) = element.right_neighbor() {
+                if right_neighbor != id && sibling_ids.contains(&right_neighbor) {
+                    outgoing.entry(id).or_default().push(right_neighbor);
+                    *incoming_counts.entry(right_neighbor).or_default() += 1;
+                }
+            }
         }
 
-        a.id().cmp(&b.id())
+        let mut remaining: BTreeSet<ElementId> = sibling_ids.iter().copied().collect();
+        let mut ready: BTreeSet<ElementId> = incoming_counts
+            .iter()
+            .filter_map(|(id, count)| (*count == 0).then_some(*id))
+            .collect();
+        let mut ordered_ids = Vec::with_capacity(siblings.len());
+
+        while !remaining.is_empty() {
+            let next = ready
+                .pop_first()
+                .unwrap_or_else(|| *remaining.iter().next().expect("remaining is not empty"));
+
+            if !remaining.remove(&next) {
+                continue;
+            }
+
+            ordered_ids.push(next);
+
+            for right_neighbor in outgoing.remove(&next).unwrap_or_default() {
+                if let Some(incoming_count) = incoming_counts.get_mut(&right_neighbor) {
+                    *incoming_count -= 1;
+
+                    if *incoming_count == 0 && remaining.contains(&right_neighbor) {
+                        ready.insert(right_neighbor);
+                    }
+                }
+            }
+        }
+
+        let ranks: HashMap<ElementId, usize> = ordered_ids
+            .into_iter()
+            .enumerate()
+            .map(|(rank, id)| (id, rank))
+            .collect();
+
+        siblings.sort_by_key(|element| {
+            (
+                ranks
+                    .get(&element.id())
+                    .copied()
+                    .expect("all siblings receive a rank"),
+                element.id(),
+            )
+        });
     }
 }
 
@@ -329,4 +382,54 @@ fn applying_remote_operation_advances_the_local_clock() {
     };
 
     assert!(local_counter > remote_counter);
+}
+
+#[test]
+fn sibling_ordering_honors_transitive_right_neighbor_chains() {
+    let replica_id = Uuid::from_u128(1);
+    let one = Timestamp::zero().next();
+    let two = one.next();
+    let three = two.next();
+
+    let a = ElementId::new(replica_id, three);
+    let b = ElementId::new(replica_id, two);
+    let c = ElementId::new(replica_id, one);
+
+    let operations = [
+        TextOperation::Insert {
+            op_id: OperationId::new(replica_id, three),
+            element_id: a,
+            left_neighbor: None,
+            right_neighbor: Some(b),
+            value: 'A',
+        },
+        TextOperation::Insert {
+            op_id: OperationId::new(replica_id, two),
+            element_id: b,
+            left_neighbor: None,
+            right_neighbor: Some(c),
+            value: 'B',
+        },
+        TextOperation::Insert {
+            op_id: OperationId::new(replica_id, one),
+            element_id: c,
+            left_neighbor: None,
+            right_neighbor: None,
+            value: 'C',
+        },
+    ];
+
+    let mut forward = TextCrdt::new(Uuid::from_u128(2));
+    let mut reverse = TextCrdt::new(Uuid::from_u128(3));
+
+    for op in operations.iter().cloned() {
+        forward.apply(op);
+    }
+
+    for op in operations.iter().rev().cloned() {
+        reverse.apply(op);
+    }
+
+    assert_eq!(forward.value(), "ABC");
+    assert_eq!(reverse.value(), "ABC");
 }
