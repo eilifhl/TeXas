@@ -77,6 +77,14 @@ impl TextCrdt {
                 }
 
                 self.seen_operations.insert(op_id);
+                
+                if self
+                    .elements
+                    .iter()
+                    .any(|element| element.id() == element_id)
+                {
+                    return;
+                }
 
                 let mut element =
                     TextElement::new(element_id, left_neighbor, right_neighbor, value);
@@ -357,6 +365,34 @@ fn delete_before_insert_still_tombstones_the_element() {
     b.apply(insert);
 
     assert_eq!(b.value(), "");
+}
+
+#[test]
+fn insert_with_existing_element_id_is_ignored_even_with_new_operation_id() {
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(1));
+    let replica_id = Uuid::from_u128(2);
+    let first = Timestamp::zero().next();
+    let second = first.next();
+    let element_id = ElementId::new(replica_id, first);
+
+    text_crdt.apply(TextOperation::Insert {
+        op_id: OperationId::new(replica_id, first),
+        element_id,
+        left_neighbor: None,
+        right_neighbor: None,
+        value: 'A',
+    });
+
+    text_crdt.apply(TextOperation::Insert {
+        op_id: OperationId::new(replica_id, second),
+        element_id,
+        left_neighbor: None,
+        right_neighbor: None,
+        value: 'B',
+    });
+
+    assert_eq!(text_crdt.elements.len(), 1);
+    assert_eq!(text_crdt.value(), "A");
 }
 
 #[test]
