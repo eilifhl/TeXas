@@ -9,6 +9,7 @@ pub struct TextCrdt {
     clock: Timestamp,           // to make the IDs. See the `ElementId` struct
     elements: Vec<TextElement>, // contains the text elements that create the text
     seen_operations: HashSet<OperationId>,
+    pending_deletes: HashSet<ElementId>,
 }
 
 impl TextCrdt {
@@ -18,6 +19,7 @@ impl TextCrdt {
             clock: Timestamp::zero(),
             elements: Vec::new(),
             seen_operations: HashSet::new(),
+            pending_deletes: HashSet::new(),
         }
     }
 
@@ -75,12 +77,18 @@ impl TextCrdt {
 
                 self.seen_operations.insert(op_id);
 
-                self.elements.push(TextElement::new(
+                let mut element = TextElement::new(
                     element_id,
                     left_neighbor,
                     right_neighbor,
                     value,
-                ));
+                );
+
+                if self.pending_deletes.remove(&element_id) {
+                    element.mark_deleted();
+                }
+
+                self.elements.push(element);
             }
 
             TextOperation::Delete { op_id, element_id } => {
@@ -96,6 +104,8 @@ impl TextCrdt {
                     .find(|element| element.id() == element_id)
                 {
                     element.mark_deleted();
+                } else {
+                    self.pending_deletes.insert(element_id);
                 }
             }
         }
@@ -280,4 +290,18 @@ fn right_neighbor_keeps_middle_inserts_before_the_original_right_element() {
     text_crdt.insert(1, 'B');
 
     assert_eq!(text_crdt.value(), "ABC");
+}
+
+#[test]
+fn delete_before_insert_still_tombstones_the_element() {
+    let mut a = TextCrdt::new(Uuid::from_u128(1));
+    let mut b = TextCrdt::new(Uuid::from_u128(2));
+
+    let insert = a.insert(0, 'A');
+    let delete = a.delete(0).expect("inserted element should be deletable");
+
+    b.apply(delete);
+    b.apply(insert);
+
+    assert_eq!(b.value(), "");
 }
