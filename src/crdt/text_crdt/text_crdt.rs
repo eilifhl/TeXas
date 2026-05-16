@@ -92,7 +92,11 @@ impl TextCrdt {
         }
     }
     pub fn value(&self) -> String {
-        todo!("Implement")
+        self.elements
+            .iter()
+            .filter(|element| !element.deleted())
+            .map(|element| element.value())
+            .collect()
     }
 
     fn position_for_insert(&self, index: usize) -> Position {
@@ -121,4 +125,17 @@ impl TextCrdt {
             .nth(index)
             .map(|element| element.id())
     }
+}
+
+#[test]
+fn text_crdt() {
+    let mut text_crdt = TextCrdt::new(Uuid::new_v4());
+
+    text_crdt.insert(0, 'A');
+    text_crdt.insert(1, 'B');
+    text_crdt.insert(2, 'C');
+
+    text_crdt.delete(1);
+
+    assert_eq!(text_crdt.value(), "AC");
 }

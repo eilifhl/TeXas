@@ -36,6 +36,10 @@ impl TextElement {
     pub fn deleted(&self) -> bool {
         self.deleted
     }
+    
+    pub fn value(&self) -> char {
+        self.value
+    }
 }
 
 // if replica_id = 'A'
