@@ -1,5 +1,6 @@
 use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::{ElementId, OperationId, TextElement, TextOperation};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
 
@@ -7,8 +8,12 @@ pub struct TextCrdt {
     replica_id: Uuid,
     clock: Timestamp,           // to make the IDs. See the `ElementId` struct
     elements: Vec<TextElement>, // contains the text elements that create the text
+    ordered_element_indices: RefCell<Vec<usize>>,
+    ordered_elements_dirty: Cell<bool>,
     seen_operations: HashSet<OperationId>,
     pending_deletes: HashSet<ElementId>,
+    #[cfg(test)]
+    ordered_elements_rebuilds: Cell<usize>,
 }
 
 impl TextCrdt {
@@ -17,8 +22,12 @@ impl TextCrdt {
             replica_id,
             clock: Timestamp::zero(),
             elements: Vec::new(),
+            ordered_element_indices: RefCell::new(Vec::new()),
+            ordered_elements_dirty: Cell::new(true),
             seen_operations: HashSet::new(),
             pending_deletes: HashSet::new(),
+            #[cfg(test)]
+            ordered_elements_rebuilds: Cell::new(0),
         }
     }
 
@@ -77,7 +86,7 @@ impl TextCrdt {
                 }
 
                 self.seen_operations.insert(op_id);
-                
+
                 if self
                     .elements
                     .iter()
@@ -94,6 +103,7 @@ impl TextCrdt {
                 }
 
                 self.elements.push(element);
+                self.invalidate_ordered_elements();
             }
 
             TextOperation::Delete { op_id, element_id } => {
@@ -118,10 +128,13 @@ impl TextCrdt {
         }
     }
     pub fn value(&self) -> String {
-        self.ordered_elements()
-            .into_iter()
-            .filter(|element| !element.deleted())
-            .map(|element| element.value())
+        self.ordered_element_indices()
+            .iter()
+            .filter_map(|&element_index| {
+                let element = &self.elements[element_index];
+
+                (!element.deleted()).then_some(element.value())
+            })
             .collect()
     }
 
@@ -129,11 +142,13 @@ impl TextCrdt {
         let mut left_neighbor = None;
         let mut visible_index = 0;
 
-        for element in self
-            .ordered_elements()
-            .into_iter()
-            .filter(|element| !element.deleted())
-        {
+        for &element_index in self.ordered_element_indices().iter() {
+            let element = &self.elements[element_index];
+
+            if element.deleted() {
+                continue;
+            }
+
             if visible_index == index {
                 return (left_neighbor, Some(element.id()));
             }
@@ -146,42 +161,65 @@ impl TextCrdt {
     }
 
     fn element_id_from_index(&self, index: usize) -> Option<ElementId> {
-        self.ordered_elements()
-            .into_iter()
-            .filter(|element| !element.deleted())
+        self.ordered_element_indices()
+            .iter()
+            .filter_map(|&element_index| {
+                let element = &self.elements[element_index];
+
+                (!element.deleted()).then_some(element.id())
+            })
             .nth(index)
-            .map(|element| element.id())
     }
 
-    fn ordered_elements(&self) -> Vec<&TextElement> {
-        let mut children_by_left_neighbor: HashMap<Option<ElementId>, Vec<&TextElement>> =
-            HashMap::new();
+    fn ordered_element_indices(&self) -> Ref<'_, Vec<usize>> {
+        if self.ordered_elements_dirty.get() {
+            let ordered_element_indices = self.compute_ordered_element_indices();
 
-        for element in &self.elements {
+            *self.ordered_element_indices.borrow_mut() = ordered_element_indices;
+            self.ordered_elements_dirty.set(false);
+
+            #[cfg(test)]
+            self.ordered_elements_rebuilds
+                .set(self.ordered_elements_rebuilds.get() + 1);
+        }
+
+        self.ordered_element_indices.borrow()
+    }
+
+    fn invalidate_ordered_elements(&self) {
+        self.ordered_elements_dirty.set(true);
+    }
+
+    fn compute_ordered_element_indices(&self) -> Vec<usize> {
+        let mut children_by_left_neighbor: HashMap<Option<ElementId>, Vec<usize>> = HashMap::new();
+
+        for (element_index, element) in self.elements.iter().enumerate() {
             children_by_left_neighbor
                 .entry(element.left_neighbor())
                 .or_default()
-                .push(element);
+                .push(element_index);
         }
 
         for siblings in children_by_left_neighbor.values_mut() {
-            Self::order_siblings(siblings);
+            self.order_siblings(siblings);
         }
 
         let mut ordered = Vec::with_capacity(self.elements.len());
         let mut visited = HashSet::new();
 
-        Self::append_children(None, &children_by_left_neighbor, &mut visited, &mut ordered);
+        self.append_children(None, &children_by_left_neighbor, &mut visited, &mut ordered);
 
-        let mut orphans: Vec<&TextElement> = self
+        let mut orphans: Vec<usize> = self
             .elements
             .iter()
-            .filter(|element| !visited.contains(&element.id()))
+            .enumerate()
+            .filter(|(_, element)| !visited.contains(&element.id()))
+            .map(|(element_index, _)| element_index)
             .collect();
-        orphans.sort_by_key(|element| element.id());
+        orphans.sort_by_key(|&element_index| self.elements[element_index].id());
 
         for orphan in orphans {
-            Self::append_element(
+            self.append_element(
                 orphan,
                 &children_by_left_neighbor,
                 &mut visited,
@@ -192,31 +230,35 @@ impl TextCrdt {
         ordered
     }
 
-    fn append_children<'a>(
+    fn append_children(
+        &self,
         left_neighbor: Option<ElementId>,
-        children_by_left_neighbor: &HashMap<Option<ElementId>, Vec<&'a TextElement>>,
+        children_by_left_neighbor: &HashMap<Option<ElementId>, Vec<usize>>,
         visited: &mut HashSet<ElementId>,
-        ordered: &mut Vec<&'a TextElement>,
+        ordered: &mut Vec<usize>,
     ) {
         if let Some(children) = children_by_left_neighbor.get(&left_neighbor) {
-            for child in children {
-                Self::append_element(child, children_by_left_neighbor, visited, ordered);
+            for &child in children {
+                self.append_element(child, children_by_left_neighbor, visited, ordered);
             }
         }
     }
 
-    fn append_element<'a>(
-        element: &'a TextElement,
-        children_by_left_neighbor: &HashMap<Option<ElementId>, Vec<&'a TextElement>>,
+    fn append_element(
+        &self,
+        element_index: usize,
+        children_by_left_neighbor: &HashMap<Option<ElementId>, Vec<usize>>,
         visited: &mut HashSet<ElementId>,
-        ordered: &mut Vec<&'a TextElement>,
+        ordered: &mut Vec<usize>,
     ) {
+        let element = &self.elements[element_index];
+
         if !visited.insert(element.id()) {
             return;
         }
 
-        ordered.push(element);
-        Self::append_children(
+        ordered.push(element_index);
+        self.append_children(
             Some(element.id()),
             children_by_left_neighbor,
             visited,
@@ -224,18 +266,23 @@ impl TextCrdt {
         );
     }
 
-    fn order_siblings(siblings: &mut Vec<&TextElement>) {
+    fn order_siblings(&self, siblings: &mut Vec<usize>) {
         if siblings.len() < 2 {
             return;
         }
 
-        let sibling_ids: HashSet<ElementId> = siblings.iter().map(|element| element.id()).collect();
+        let sibling_ids: HashSet<ElementId> = siblings
+            .iter()
+            .map(|&element_index| self.elements[element_index].id())
+            .collect();
         let mut outgoing: HashMap<ElementId, Vec<ElementId>> = HashMap::new();
         let mut incoming_counts: HashMap<ElementId, usize> =
             sibling_ids.iter().map(|id| (*id, 0)).collect();
 
-        for element in siblings.iter() {
+        for &element_index in siblings.iter() {
+            let element = &self.elements[element_index];
             let id = element.id();
+
             if let Some(right_neighbor) = element.right_neighbor() {
                 if right_neighbor != id && sibling_ids.contains(&right_neighbor) {
                     outgoing.entry(id).or_default().push(right_neighbor);
@@ -279,7 +326,9 @@ impl TextCrdt {
             .map(|(rank, id)| (id, rank))
             .collect();
 
-        siblings.sort_by_key(|element| {
+        siblings.sort_by_key(|&element_index| {
+            let element = &self.elements[element_index];
+
             (
                 ranks
                     .get(&element.id())
@@ -393,6 +442,27 @@ fn insert_with_existing_element_id_is_ignored_even_with_new_operation_id() {
 
     assert_eq!(text_crdt.elements.len(), 1);
     assert_eq!(text_crdt.value(), "A");
+}
+
+#[test]
+fn ordered_view_is_cached_between_mutations() {
+    let mut text_crdt = TextCrdt::new(Uuid::from_u128(1));
+
+    text_crdt.insert(0, 'A');
+
+    assert_eq!(text_crdt.value(), "A");
+    assert_eq!(text_crdt.ordered_elements_rebuilds.get(), 2);
+
+    assert_eq!(text_crdt.value(), "A");
+    assert_eq!(text_crdt.ordered_elements_rebuilds.get(), 2);
+
+    text_crdt.insert(1, 'B');
+    assert_eq!(text_crdt.value(), "AB");
+    assert_eq!(text_crdt.ordered_elements_rebuilds.get(), 3);
+
+    text_crdt.delete(0);
+    assert_eq!(text_crdt.value(), "B");
+    assert_eq!(text_crdt.ordered_elements_rebuilds.get(), 3);
 }
 
 #[test]
