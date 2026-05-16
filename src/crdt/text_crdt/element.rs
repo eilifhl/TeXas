@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::Position;
 use uuid::Uuid;
@@ -36,7 +37,7 @@ impl TextElement {
     pub fn deleted(&self) -> bool {
         self.deleted
     }
-    
+
     pub fn value(&self) -> char {
         self.value
     }
@@ -45,7 +46,7 @@ impl TextElement {
 // if replica_id = 'A'
 // Insert 'H' -> clock becomes 1 -> element id = (A, 1)
 // Insert 'i' -> clock becomes 2 -> element id = (A, 2)
-#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ElementId {
     replica_id: Uuid,
     counter: Timestamp,

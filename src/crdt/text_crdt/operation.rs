@@ -3,7 +3,7 @@ use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::{ElementId, Position};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OperationId {
     replica_id: Uuid,
     counter: Timestamp,
