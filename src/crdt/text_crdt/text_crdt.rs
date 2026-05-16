@@ -70,6 +70,8 @@ impl TextCrdt {
                 right_neighbor,
                 value,
             } => {
+                self.clock = self.clock.max(op_id.counter());
+
                 if self.seen_operations.contains(&op_id) {
                     // already applied operation; return early
                     return;
@@ -77,12 +79,8 @@ impl TextCrdt {
 
                 self.seen_operations.insert(op_id);
 
-                let mut element = TextElement::new(
-                    element_id,
-                    left_neighbor,
-                    right_neighbor,
-                    value,
-                );
+                let mut element =
+                    TextElement::new(element_id, left_neighbor, right_neighbor, value);
 
                 if self.pending_deletes.remove(&element_id) {
                     element.mark_deleted();
@@ -92,6 +90,8 @@ impl TextCrdt {
             }
 
             TextOperation::Delete { op_id, element_id } => {
+                self.clock = self.clock.max(op_id.counter());
+
                 if self.seen_operations.contains(&op_id) {
                     return;
                 }
@@ -304,4 +304,29 @@ fn delete_before_insert_still_tombstones_the_element() {
     b.apply(insert);
 
     assert_eq!(b.value(), "");
+}
+
+#[test]
+fn applying_remote_operation_advances_the_local_clock() {
+    let mut a = TextCrdt::new(Uuid::from_u128(1));
+    let mut b = TextCrdt::new(Uuid::from_u128(2));
+
+    let first = a.insert(0, 'A');
+    let second = a.insert(1, 'B');
+
+    b.apply(first);
+    b.apply(second.clone());
+
+    let remote_counter = match second {
+        TextOperation::Insert { op_id, .. } => op_id.counter(),
+        TextOperation::Delete { .. } => unreachable!("insert returns an insert operation"),
+    };
+
+    let local = b.insert(2, 'C');
+    let local_counter = match local {
+        TextOperation::Insert { op_id, .. } => op_id.counter(),
+        TextOperation::Delete { .. } => unreachable!("insert returns an insert operation"),
+    };
+
+    assert!(local_counter > remote_counter);
 }

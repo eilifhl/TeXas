@@ -1,5 +1,5 @@
-use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::ElementId;
+use crate::crdt::text_crdt::timestamp::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,6 +15,10 @@ impl OperationId {
             replica_id,
             counter,
         }
+    }
+
+    pub fn counter(self) -> Timestamp {
+        self.counter
     }
 }
 
