@@ -7,7 +7,7 @@ use super::{TexasApp, theme::ThemeMode, theme::palette};
 
 impl TexasApp {
     pub(super) fn render(&mut self, ctx: &Context) {
-        let colors = palette(self.theme_mode);
+        let colors = palette(self.model.theme_mode);
 
         TopBottomPanel::top("top_bar")
             .frame(
@@ -36,7 +36,7 @@ impl TexasApp {
                         if ui
                             .add_sized(
                                 [112.0, 36.0],
-                                egui::Button::new(match self.theme_mode {
+                                egui::Button::new(match self.model.theme_mode {
                                     ThemeMode::Light => "Dark mode",
                                     ThemeMode::Dark => "Light mode",
                                 }),
@@ -46,11 +46,19 @@ impl TexasApp {
                             self.toggle_theme(ctx);
                         }
 
-                        let open_pdf = ui.add_enabled_ui(self.last_pdf_path.is_some(), |ui| {
-                            ui.add_sized([112.0, 36.0], egui::Button::new("Open PDF"))
-                        });
+                        let open_pdf = ui
+                            .add_enabled_ui(self.model.last_pdf_path.is_some(), |ui| {
+                                ui.add_sized([112.0, 36.0], egui::Button::new("Open PDF"))
+                            });
                         if open_pdf.inner.clicked() {
                             self.open_pdf();
+                        }
+
+                        if ui
+                            .add_sized([112.0, 36.0], egui::Button::new("Send test"))
+                            .clicked()
+                        {
+                            self.publish_test_message();
                         }
 
                         if ui
@@ -91,7 +99,7 @@ impl TexasApp {
                         ui.set_min_height(output_height);
                         ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
                             ui.label(
-                                RichText::new(&self.output_text)
+                                RichText::new(&self.model.output_text)
                                     .small()
                                     .monospace()
                                     .color(colors.text_color),
@@ -122,7 +130,7 @@ impl TexasApp {
                     .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.set_min_height(editor_height);
-                        TextEdit::multiline(&mut self.editor_text)
+                        TextEdit::multiline(&mut self.model.editor_text)
                             .desired_width(ui.available_width())
                             .desired_rows(30)
                             .min_size(ui.available_size())
