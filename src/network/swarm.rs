@@ -1,6 +1,7 @@
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 use libp2p::futures::StreamExt;
-use libp2p::{gossipsub, mdns, noise, ping, swarm::SwarmEvent, tcp, yamux};
+use libp2p::{Multiaddr, PeerId, gossipsub, mdns, noise, ping, swarm::SwarmEvent, tcp, yamux};
 use tokio::sync::mpsc;
 
 use crate::network::{
@@ -40,6 +41,7 @@ pub async fn run(
     let _ = events.send(NetworkEvent::LocalPeerId(swarm.local_peer_id().to_string()));
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    let mut mdns_peers: HashMap<PeerId, HashSet<Multiaddr>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -49,7 +51,12 @@ pub async fn run(
                         let _ = events.send(NetworkEvent::Listening(address.to_string()));
                     }
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Mdns(event)) => {
-                        handle_mdns_event(event, &mut swarm.behaviour_mut().gossipsub, &events);
+                        handle_mdns_event(
+                            event,
+                            &mut mdns_peers,
+                            &mut swarm.behaviour_mut().gossipsub,
+                            &events,
+                        );
                     }
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Gossipsub(event)) => {
                         handle_gossipsub_event(event, &events);
@@ -82,20 +89,37 @@ pub async fn run(
 
 fn handle_mdns_event(
     event: mdns::Event,
+    mdns_peers: &mut HashMap<PeerId, HashSet<Multiaddr>>,
     gossipsub: &mut gossipsub::Behaviour,
     events: &mpsc::UnboundedSender<NetworkEvent>,
 ) {
     match event {
         mdns::Event::Discovered(list) => {
-            for (peer_id, _addr) in list {
-                gossipsub.add_explicit_peer(&peer_id);
-                let _ = events.send(NetworkEvent::PeerDiscovered(peer_id.to_string()));
+            for (peer_id, addr) in list {
+                let known_addresses = mdns_peers.entry(peer_id).or_default();
+                let is_new_peer = known_addresses.is_empty();
+
+                known_addresses.insert(addr);
+
+                if is_new_peer {
+                    gossipsub.add_explicit_peer(&peer_id);
+                    let _ = events.send(NetworkEvent::PeerDiscovered(peer_id.to_string()));
+                }
             }
         }
         mdns::Event::Expired(list) => {
-            for (peer_id, _addr) in list {
-                gossipsub.remove_explicit_peer(&peer_id);
-                let _ = events.send(NetworkEvent::PeerExpired(peer_id.to_string()));
+            for (peer_id, addr) in list {
+                let Some(known_addresses) = mdns_peers.get_mut(&peer_id) else {
+                    continue;
+                };
+
+                known_addresses.remove(&addr);
+
+                if known_addresses.is_empty() {
+                    mdns_peers.remove(&peer_id);
+                    gossipsub.remove_explicit_peer(&peer_id);
+                    let _ = events.send(NetworkEvent::PeerExpired(peer_id.to_string()));
+                }
             }
         }
     }
