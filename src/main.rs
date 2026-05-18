@@ -1,3 +1,5 @@
+pub mod crdt;
+
 use std::{
     env,
     fs,
@@ -10,6 +12,8 @@ use eframe::egui::{
     self, Align, CentralPanel, Color32, Context, CornerRadius, FontFamily, FontId, Frame,
     Layout, Margin, RichText, ScrollArea, SidePanel, Stroke, TextEdit, TopBottomPanel, Vec2,
 };
+use uuid::Uuid;
+use crate::crdt::text_crdt::TextCrdt;
 
 const CARBON_BLUE_60: Color32 = Color32::from_rgb(15, 98, 254);
 const CARBON_BLUE_80: Color32 = Color32::from_rgb(69, 137, 255);
@@ -25,6 +29,8 @@ const GOV_UK_BLACK: Color32 = Color32::from_rgb(11, 12, 12);
 const GOV_UK_WHITE: Color32 = Color32::from_rgb(255, 255, 255);
 
 fn main() -> eframe::Result<()> {
+    let _text_crdt = TextCrdt::new(Uuid::new_v4());
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("TeXas")
