@@ -5,6 +5,7 @@ mod ui;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use eframe::egui::Context;
@@ -76,8 +77,12 @@ impl TexasApp {
     pub fn new(ctx: &Context, runtime: Runtime) -> Result<Self> {
         let theme_mode = ThemeMode::Dark;
         configure_theme(ctx, theme_mode);
+        let repaint_signal = Arc::new({
+            let ctx = ctx.clone();
+            move || ctx.request_repaint()
+        });
 
-        let network = network::start(runtime.handle())?;
+        let network = network::start(runtime.handle(), repaint_signal)?;
         network.subscribe(DEFAULT_DOCUMENT_TOPIC)?;
 
         Ok(Self {

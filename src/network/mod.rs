@@ -1,12 +1,16 @@
 mod swarm;
 mod texas_behaviour;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use tokio::{runtime::Handle, sync::mpsc};
 
 const NETWORK_EVENT_BUFFER: usize = 256;
 
 pub const DEFAULT_DOCUMENT_TOPIC: &str = "texas/document/main";
+
+pub type RepaintSignal = Arc<dyn Fn() + Send + Sync>;
 
 pub enum NetworkEvent {
     LocalPeerId(String),
@@ -56,14 +60,20 @@ impl NetworkHandle {
     }
 }
 
-pub fn start(runtime: &Handle) -> Result<NetworkHandle> {
+pub fn start(runtime: &Handle, repaint: RepaintSignal) -> Result<NetworkHandle> {
     let (event_sender, receiver) = mpsc::channel(NETWORK_EVENT_BUFFER);
     let (command_sender, command_receiver) = mpsc::unbounded_channel();
     let service_sender = event_sender.clone();
 
     runtime.spawn(async move {
-        if let Err(error) = swarm::run(service_sender, command_receiver).await {
-            let _ = event_sender.send(NetworkEvent::Error(error.to_string())).await;
+        if let Err(error) = swarm::run(service_sender, command_receiver, repaint.clone()).await {
+            if event_sender
+                .send(NetworkEvent::Error(error.to_string()))
+                .await
+                .is_ok()
+            {
+                repaint.as_ref()();
+            }
         }
     });
 

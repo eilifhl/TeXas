@@ -5,6 +5,7 @@ use libp2p::{Multiaddr, PeerId, gossipsub, mdns, noise, ping, swarm::SwarmEvent,
 use tokio::sync::mpsc;
 
 use crate::network::{
+    RepaintSignal,
     NetworkCommand, NetworkEvent,
     texas_behaviour::{TexasBehaviour, TexasBehaviourEvent},
 };
@@ -12,6 +13,7 @@ use crate::network::{
 pub async fn run(
     events: mpsc::Sender<NetworkEvent>,
     mut commands: mpsc::UnboundedReceiver<NetworkCommand>,
+    repaint: RepaintSignal,
 ) -> Result<()> {
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -38,7 +40,12 @@ pub async fn run(
         })?
         .build();
 
-    send_event(&events, NetworkEvent::LocalPeerId(swarm.local_peer_id().to_string())).await;
+    emit_event(
+        &events,
+        &repaint,
+        NetworkEvent::LocalPeerId(swarm.local_peer_id().to_string()),
+    )
+    .await;
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     let mut mdns_peers: HashMap<PeerId, HashSet<Multiaddr>> = HashMap::new();
@@ -48,7 +55,8 @@ pub async fn run(
             swarm_event = swarm.select_next_some() => {
                 match swarm_event {
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        send_event(&events, NetworkEvent::Listening(address.to_string())).await;
+                        emit_event(&events, &repaint, NetworkEvent::Listening(address.to_string()))
+                            .await;
                     }
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Mdns(event)) => {
                         handle_mdns_event(
@@ -56,14 +64,15 @@ pub async fn run(
                             &mut mdns_peers,
                             &mut swarm.behaviour_mut().gossipsub,
                             &events,
+                            &repaint,
                         )
                         .await;
                     }
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Gossipsub(event)) => {
-                        handle_gossipsub_event(event, &events).await;
+                        handle_gossipsub_event(event, &events, &repaint).await;
                     }
                     SwarmEvent::Behaviour(event) => {
-                        send_event(&events, NetworkEvent::Log(format!("{event:?}"))).await;
+                        emit_event(&events, &repaint, NetworkEvent::Log(format!("{event:?}"))).await;
                     }
                     _ => {}
                 }
@@ -71,16 +80,28 @@ pub async fn run(
             command = commands.recv() => {
                 match command {
                     Some(NetworkCommand::Subscribe { topic }) => {
-                        subscribe_topic(&mut swarm.behaviour_mut().gossipsub, &topic, &events)
-                            .await?;
+                        subscribe_topic(
+                            &mut swarm.behaviour_mut().gossipsub,
+                            &topic,
+                            &events,
+                            &repaint,
+                        )
+                        .await?;
                     }
                     Some(NetworkCommand::Publish { topic, payload }) => {
-                        publish_message(&mut swarm.behaviour_mut().gossipsub, &topic, payload, &events)
-                            .await?;
+                        publish_message(
+                            &mut swarm.behaviour_mut().gossipsub,
+                            &topic,
+                            payload,
+                            &events,
+                            &repaint,
+                        )
+                        .await?;
                     }
                     None => {
-                        send_event(
+                        emit_event(
                             &events,
+                            &repaint,
                             NetworkEvent::Log("network command channel closed".to_owned()),
                         )
                         .await;
@@ -99,6 +120,7 @@ async fn handle_mdns_event(
     mdns_peers: &mut HashMap<PeerId, HashSet<Multiaddr>>,
     gossipsub: &mut gossipsub::Behaviour,
     events: &mpsc::Sender<NetworkEvent>,
+    repaint: &RepaintSignal,
 ) {
     match event {
         mdns::Event::Discovered(list) => {
@@ -110,7 +132,8 @@ async fn handle_mdns_event(
 
                 if is_new_peer {
                     gossipsub.add_explicit_peer(&peer_id);
-                    send_event(events, NetworkEvent::PeerDiscovered(peer_id.to_string())).await;
+                    emit_event(events, repaint, NetworkEvent::PeerDiscovered(peer_id.to_string()))
+                        .await;
                 }
             }
         }
@@ -125,7 +148,8 @@ async fn handle_mdns_event(
                 if known_addresses.is_empty() {
                     mdns_peers.remove(&peer_id);
                     gossipsub.remove_explicit_peer(&peer_id);
-                    send_event(events, NetworkEvent::PeerExpired(peer_id.to_string())).await;
+                    emit_event(events, repaint, NetworkEvent::PeerExpired(peer_id.to_string()))
+                        .await;
                 }
             }
         }
@@ -136,10 +160,11 @@ async fn subscribe_topic(
     gossipsub: &mut gossipsub::Behaviour,
     topic: &str,
     events: &mpsc::Sender<NetworkEvent>,
+    repaint: &RepaintSignal,
 ) -> Result<()> {
     let topic = gossipsub::IdentTopic::new(topic);
     gossipsub.subscribe(&topic)?;
-    send_event(events, NetworkEvent::Subscribed(topic.to_string())).await;
+    emit_event(events, repaint, NetworkEvent::Subscribed(topic.to_string())).await;
     Ok(())
 }
 
@@ -148,23 +173,30 @@ async fn publish_message(
     topic: &str,
     payload: Vec<u8>,
     events: &mpsc::Sender<NetworkEvent>,
+    repaint: &RepaintSignal,
 ) -> Result<()> {
     let topic = gossipsub::IdentTopic::new(topic);
     gossipsub.publish(topic.clone(), payload)?;
-    send_event(
+    emit_event(
         events,
+        repaint,
         NetworkEvent::Log(format!("published message on {}", topic)),
     )
     .await;
     Ok(())
 }
 
-async fn handle_gossipsub_event(event: gossipsub::Event, events: &mpsc::Sender<NetworkEvent>) {
+async fn handle_gossipsub_event(
+    event: gossipsub::Event,
+    events: &mpsc::Sender<NetworkEvent>,
+    repaint: &RepaintSignal,
+) {
     match event {
         gossipsub::Event::Message { message, .. } => {
             let payload = String::from_utf8_lossy(&message.data).into_owned();
-            send_event(
+            emit_event(
                 events,
+                repaint,
                 NetworkEvent::MessageReceived {
                     topic: message.topic.to_string(),
                     payload,
@@ -173,18 +205,26 @@ async fn handle_gossipsub_event(event: gossipsub::Event, events: &mpsc::Sender<N
             .await;
         }
         other => {
-            send_event(events, NetworkEvent::Log(format!("{other:?}"))).await;
+            emit_event(events, repaint, NetworkEvent::Log(format!("{other:?}"))).await;
         }
     }
 }
 
-async fn send_event(events: &mpsc::Sender<NetworkEvent>, event: NetworkEvent) {
-    match event {
+async fn emit_event(
+    events: &mpsc::Sender<NetworkEvent>,
+    repaint: &RepaintSignal,
+    event: NetworkEvent,
+) {
+    let queued = match event {
         NetworkEvent::Log(message) => {
-            let _ = events.try_send(NetworkEvent::Log(message));
+            events.try_send(NetworkEvent::Log(message)).is_ok()
         }
         other => {
-            let _ = events.send(other).await;
+            events.send(other).await.is_ok()
         }
+    };
+
+    if queued {
+        repaint.as_ref()();
     }
 }
