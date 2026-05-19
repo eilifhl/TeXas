@@ -3,7 +3,7 @@ use eframe::egui::{
     Stroke, TextEdit, TopBottomPanel,
 };
 
-use super::{TexasApp, theme::ThemeMode, theme::palette};
+use super::{theme::palette, theme::ThemeMode, TexasApp};
 
 impl TexasApp {
     pub(super) fn render(&mut self, ctx: &Context) {
@@ -90,14 +90,22 @@ impl TexasApp {
                 );
                 ui.add_space(4.0);
 
-                let output_height = ui.available_height();
-                Frame::new()
+                let output_frame = Frame::new()
                     .fill(colors.surface_fill)
                     .stroke(Stroke::new(1.0, colors.border_color))
-                    .inner_margin(Margin::same(10))
-                    .show(ui, |ui| {
-                        ui.set_min_height(output_height);
-                        ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+                    .inner_margin(Margin::same(10));
+                let output_size =
+                    (ui.available_size() - output_frame.total_margin().sum()).max(egui::Vec2::ZERO);
+
+                output_frame.show(ui, |ui| {
+                    ui.set_min_size(output_size);
+                    ScrollArea::vertical()
+                        .id_salt("build_output_scroll")
+                        .stick_to_bottom(true)
+                        .max_height(output_size.y)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(output_size.x);
                             ui.label(
                                 RichText::new(&self.model.output_text)
                                     .small()
@@ -105,7 +113,7 @@ impl TexasApp {
                                     .color(colors.text_color),
                             );
                         });
-                    });
+                });
             });
 
         CentralPanel::default()
@@ -123,22 +131,32 @@ impl TexasApp {
                 );
                 ui.add_space(8.0);
 
-                let editor_height = ui.available_height();
-                Frame::new()
+                let editor_frame = Frame::new()
                     .fill(colors.panel_fill)
                     .stroke(Stroke::new(1.0, colors.border_color))
-                    .inner_margin(Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_min_height(editor_height);
-                        TextEdit::multiline(&mut self.model.editor_text)
-                            .desired_width(ui.available_width())
-                            .desired_rows(30)
-                            .min_size(ui.available_size())
-                            .font(egui::TextStyle::Monospace)
-                            .hint_text("Start writing LaTeX here...")
-                            .text_color(colors.text_color)
-                            .show(ui);
-                    });
+                    .inner_margin(Margin::same(12));
+                let editor_size =
+                    (ui.available_size() - editor_frame.total_margin().sum()).max(egui::Vec2::ZERO);
+
+                editor_frame.show(ui, |ui| {
+                    ui.set_min_size(editor_size);
+                    ScrollArea::vertical()
+                        .id_salt("editor_scroll")
+                        .max_height(editor_size.y)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                [ui.available_width(), editor_size.y],
+                                TextEdit::multiline(&mut self.model.editor_text)
+                                    .desired_width(ui.available_width())
+                                    .desired_rows(30)
+                                    .font(egui::TextStyle::Monospace)
+                                    .frame(false)
+                                    .hint_text("Start writing LaTeX here...")
+                                    .text_color(colors.text_color),
+                            );
+                        });
+                });
             });
     }
 }
