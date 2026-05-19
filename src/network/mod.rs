@@ -4,6 +4,8 @@ mod texas_behaviour;
 use anyhow::Result;
 use tokio::{runtime::Handle, sync::mpsc};
 
+const NETWORK_EVENT_BUFFER: usize = 256;
+
 pub const DEFAULT_DOCUMENT_TOPIC: &str = "texas/document/main";
 
 pub enum NetworkEvent {
@@ -23,7 +25,7 @@ pub enum NetworkCommand {
 }
 
 pub struct NetworkHandle {
-    receiver: mpsc::UnboundedReceiver<NetworkEvent>,
+    receiver: mpsc::Receiver<NetworkEvent>,
     command_sender: mpsc::UnboundedSender<NetworkCommand>,
 }
 
@@ -55,13 +57,13 @@ impl NetworkHandle {
 }
 
 pub fn start(runtime: &Handle) -> Result<NetworkHandle> {
-    let (event_sender, receiver) = mpsc::unbounded_channel();
+    let (event_sender, receiver) = mpsc::channel(NETWORK_EVENT_BUFFER);
     let (command_sender, command_receiver) = mpsc::unbounded_channel();
     let service_sender = event_sender.clone();
 
     runtime.spawn(async move {
         if let Err(error) = swarm::run(service_sender, command_receiver).await {
-            let _ = event_sender.send(NetworkEvent::Error(error.to_string()));
+            let _ = event_sender.send(NetworkEvent::Error(error.to_string())).await;
         }
     });
 
