@@ -80,23 +80,31 @@ pub async fn run(
             command = commands.recv() => {
                 match command {
                     Some(NetworkCommand::Subscribe { topic }) => {
-                        subscribe_topic(
+                        if let Err(error) = subscribe_topic(
                             &mut swarm.behaviour_mut().gossipsub,
                             &topic,
                             &events,
                             &repaint,
                         )
-                        .await?;
+                        .await
+                        {
+                            emit_event(&events, &repaint, NetworkEvent::Error(error.to_string()))
+                                .await;
+                        }
                     }
                     Some(NetworkCommand::Publish { topic, payload }) => {
-                        publish_message(
+                        if let Err(error) = publish_message(
                             &mut swarm.behaviour_mut().gossipsub,
                             &topic,
                             payload,
                             &events,
                             &repaint,
                         )
-                        .await?;
+                        .await
+                        {
+                            emit_event(&events, &repaint, NetworkEvent::Error(error.to_string()))
+                                .await;
+                        }
                     }
                     None => {
                         emit_event(
