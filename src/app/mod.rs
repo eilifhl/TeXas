@@ -57,7 +57,8 @@ impl AppModel {
     }
 
     fn apply_network_event(&mut self, event: NetworkEvent) -> Option<AppEffect> {
-        let (next_status, effect) = reduce_network_event(self.network_status.clone(), event);
+        let current_status = std::mem::take(&mut self.network_status);
+        let (next_status, effect) = reduce_network_event(current_status, event);
         self.network_status = next_status;
         effect
     }
