@@ -1,4 +1,5 @@
 mod app;
+mod crdt;
 mod network;
 
 use anyhow::Result;
