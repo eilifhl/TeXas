@@ -105,7 +105,7 @@ impl TexasApp {
                         .max_height(output_size.y)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.set_min_width(output_size.x);
+                            ui.set_min_width(ui.available_width());
                             ui.label(
                                 RichText::new(&self.model.output_text)
                                     .small()
