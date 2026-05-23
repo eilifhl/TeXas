@@ -4617,6 +4617,7 @@ dependencies = [
  "egui",
  "libp2p",
  "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]
