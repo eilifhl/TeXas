@@ -4,7 +4,8 @@ pub mod theme;
 mod ui;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -24,6 +25,7 @@ pub struct TexasApp {
 
 struct AppModel {
     editor_text: String,
+    document_path: PathBuf,
     output_text: String,
     last_pdf_path: Option<PathBuf>,
     theme_mode: ThemeMode,
@@ -42,14 +44,18 @@ enum AppEffect {
 }
 
 impl AppModel {
-    fn new(theme_mode: ThemeMode) -> Self {
-        Self {
-            editor_text: SAMPLE_DOCUMENT.to_owned(),
+    fn new(theme_mode: ThemeMode) -> Result<Self> {
+        let document_path = default_document_path();
+        let editor_text = load_document(&document_path)?;
+
+        Ok(Self {
+            editor_text,
+            document_path,
             output_text: "No build output yet.".to_owned(),
             last_pdf_path: None,
             theme_mode,
             network_status: NetworkStatus::default(),
-        }
+        })
     }
 
     fn apply_build_result(&mut self, result: build::BuildResult) {
@@ -86,7 +92,7 @@ impl TexasApp {
         network.subscribe(DEFAULT_DOCUMENT_TOPIC)?;
 
         Ok(Self {
-            model: AppModel::new(theme_mode),
+            model: AppModel::new(theme_mode)?,
             network,
             _runtime: runtime,
         })
@@ -95,6 +101,15 @@ impl TexasApp {
     pub(crate) fn compile(&mut self) {
         let result = run_latexmk(&self.model.editor_text);
         self.model.apply_build_result(result);
+    }
+
+    pub(crate) fn persist_document(&mut self) {
+        if let Err(error) = save_document(&self.model.document_path, &self.model.editor_text) {
+            self.model.apply_effect(AppEffect::Log(format!(
+                "[editor] failed to save {}: {error}",
+                self.model.document_path.display()
+            )));
+        }
     }
 
     pub(crate) fn open_pdf(&mut self) {
@@ -193,6 +208,22 @@ fn short_peer_id(peer_id: &str) -> &str {
     peer_id.get(..12).unwrap_or(peer_id)
 }
 
+fn default_document_path() -> PathBuf {
+    PathBuf::from("main.tex")
+}
+
+fn load_document(path: &Path) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn save_document(path: &Path, contents: &str) -> std::io::Result<()> {
+    fs::write(path, contents)
+}
+
 fn reduce_network_event(
     mut status: NetworkStatus,
     event: NetworkEvent,
@@ -241,23 +272,3 @@ fn reduce_network_event(
         }
     }
 }
-
-const SAMPLE_DOCUMENT: &str = r#"\documentclass{article}
-\usepackage{amsmath}
-\usepackage{graphicx}
-
-\title{Barebones TeXas Draft}
-\author{eilif tihi}
-\date{\today}
-
-\begin{document}
-\maketitle
-
-\section{Introduction}
-This is a minimal editor shell for drafting LaTeX.
-
-\section{Method}
-In the future, you should be able to edit this text in real-time, with a peer-to-peer connection.
-
-\end{document}
-"#;

@@ -145,7 +145,7 @@ impl TexasApp {
                         .max_height(editor_size.y)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.add_sized(
+                            let response = ui.add_sized(
                                 [ui.available_width(), editor_size.y],
                                 TextEdit::multiline(&mut self.model.editor_text)
                                     .desired_width(ui.available_width())
@@ -155,6 +155,10 @@ impl TexasApp {
                                     .hint_text("Start writing LaTeX here...")
                                     .text_color(colors.text_color),
                             );
+
+                            if response.changed() {
+                                self.persist_document();
+                            }
                         });
                 });
             });
