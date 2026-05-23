@@ -264,7 +264,8 @@ fn reduce_network_event(
         NetworkEvent::MessageReceived { topic, payload } => (
             status,
             Some(AppEffect::Log(format!(
-                "[network] message on {topic}: {payload}"
+                "[network] message on {topic}: {} byte(s)",
+                payload.len()
             ))),
         ),
         NetworkEvent::Log(message) | NetworkEvent::Error(message) => {

@@ -201,13 +201,12 @@ async fn handle_gossipsub_event(
 ) {
     match event {
         gossipsub::Event::Message { message, .. } => {
-            let payload = String::from_utf8_lossy(&message.data).into_owned();
             emit_event(
                 events,
                 repaint,
                 NetworkEvent::MessageReceived {
                     topic: message.topic.to_string(),
-                    payload,
+                    payload: message.data,
                 },
             )
             .await;
