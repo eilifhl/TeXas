@@ -11,7 +11,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use eframe::egui::Context;
 use tokio::runtime::Runtime;
+use uuid::Uuid;
 
+use crate::crdt::text_crdt::TextCrdt;
 use crate::network::{self, DEFAULT_DOCUMENT_TOPIC, NetworkEvent, NetworkHandle};
 use build::run_latexmk;
 use platform::open_path_with_default_app;
@@ -24,6 +26,9 @@ pub struct TexasApp {
 }
 
 struct AppModel {
+    document_id: Uuid,
+    replica_id: Uuid,
+    text_crdt: TextCrdt,
     editor_text: String,
     document_path: PathBuf,
     output_text: String,
@@ -46,9 +51,17 @@ enum AppEffect {
 impl AppModel {
     fn new(theme_mode: ThemeMode) -> Result<Self> {
         let document_path = default_document_path();
-        let editor_text = load_document(&document_path)?;
+        let initial_text = load_document(&document_path)?;
+        let document_id = default_document_id();
+        let replica_id = Uuid::new_v4();
+        let mut text_crdt = TextCrdt::new(replica_id);
+        seed_text_crdt(&mut text_crdt, &initial_text);
+        let editor_text = text_crdt.value();
 
         Ok(Self {
+            document_id,
+            replica_id,
+            text_crdt,
             editor_text,
             document_path,
             output_text: "No build output yet.".to_owned(),
@@ -130,7 +143,14 @@ impl TexasApp {
     }
 
     pub(crate) fn publish_test_message(&mut self) {
-        let message = format!("test message from {}", self.connection_label());
+        let crdt_len = self.model.text_crdt.value().chars().count();
+        let message = format!(
+            "test message from {} | doc {} | replica {} | crdt chars {}",
+            self.connection_label(),
+            short_uuid(self.model.document_id),
+            short_uuid(self.model.replica_id),
+            crdt_len,
+        );
         match self
             .network
             .publish(DEFAULT_DOCUMENT_TOPIC, message.clone().into_bytes())
@@ -208,8 +228,22 @@ fn short_peer_id(peer_id: &str) -> &str {
     peer_id.get(..12).unwrap_or(peer_id)
 }
 
+fn short_uuid(id: Uuid) -> String {
+    id.to_string().chars().take(12).collect()
+}
+
+fn default_document_id() -> Uuid {
+    Uuid::from_u128(1)
+}
+
 fn default_document_path() -> PathBuf {
     PathBuf::from("main.tex")
+}
+
+fn seed_text_crdt(text_crdt: &mut TextCrdt, text: &str) {
+    for (index, value) in text.chars().enumerate() {
+        text_crdt.insert(index, value);
+    }
 }
 
 fn load_document(path: &Path) -> std::io::Result<String> {
