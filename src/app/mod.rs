@@ -57,7 +57,7 @@ impl AppModel {
         let document_id = default_document_id();
         let replica_id = Uuid::new_v4();
         let mut text_crdt = TextCrdt::new(replica_id);
-        seed_text_crdt(&mut text_crdt, &initial_text);
+        seed_text_crdt(&mut text_crdt, document_id, &initial_text);
         let editor_text = text_crdt.value();
 
         Ok(Self {
@@ -313,9 +313,16 @@ fn default_document_path() -> PathBuf {
     PathBuf::from("main.tex")
 }
 
-fn seed_text_crdt(text_crdt: &mut TextCrdt, text: &str) {
+fn bootstrap_replica_id(document_id: Uuid) -> Uuid {
+    Uuid::from_u128(document_id.as_u128() ^ 0xB00757A7000000000000000000000000)
+}
+
+fn seed_text_crdt(text_crdt: &mut TextCrdt, document_id: Uuid, text: &str) {
+    let mut bootstrap = TextCrdt::new(bootstrap_replica_id(document_id));
+
     for (index, value) in text.chars().enumerate() {
-        text_crdt.insert(index, value);
+        let operation = bootstrap.insert(index, value);
+        text_crdt.apply(operation);
     }
 }
 
@@ -448,4 +455,22 @@ fn diff_text_detects_middle_replacement() {
     assert_eq!(delta.prefix_len, 1);
     assert_eq!(delta.removed_count, 1);
     assert_eq!(delta.inserted, vec!['x']);
+}
+
+#[test]
+fn deterministic_seed_allows_followup_insert_to_apply_on_other_replica() {
+    let document_id = default_document_id();
+    let initial_text = "Hello";
+
+    let mut alice = TextCrdt::new(Uuid::from_u128(10));
+    let mut bob = TextCrdt::new(Uuid::from_u128(20));
+
+    seed_text_crdt(&mut alice, document_id, initial_text);
+    seed_text_crdt(&mut bob, document_id, initial_text);
+
+    let insert = alice.insert(initial_text.chars().count(), '!');
+    bob.apply(insert);
+
+    assert_eq!(alice.value(), "Hello!");
+    assert_eq!(bob.value(), "Hello!");
 }

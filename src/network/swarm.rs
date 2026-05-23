@@ -71,9 +71,7 @@ pub async fn run(
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Gossipsub(event)) => {
                         handle_gossipsub_event(event, &events, &repaint).await;
                     }
-                    SwarmEvent::Behaviour(event) => {
-                        emit_event(&events, &repaint, NetworkEvent::Log(format!("{event:?}"))).await;
-                    }
+                    SwarmEvent::Behaviour(TexasBehaviourEvent::Ping(_)) => {}
                     _ => {}
                 }
             }
