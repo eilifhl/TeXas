@@ -29,3 +29,37 @@ impl CrdtMessage {
         serde_json::from_slice(data).context("failed to deserialize CRDT message")
     }
 }
+
+#[test]
+fn crdt_message_round_trips_through_bytes() {
+    let sender_id = Uuid::from_u128(2);
+    let mut text_crdt = crate::crdt::text_crdt::TextCrdt::new(sender_id);
+    let message = CrdtMessage {
+        document_id: Uuid::from_u128(1),
+        sender_id,
+        operation: CrdtOperation::Text(text_crdt.insert(0, 'A')),
+    };
+
+    let bytes = message.to_bytes().expect("message should serialize");
+    let decoded = CrdtMessage::from_bytes(&bytes).expect("message should deserialize");
+
+    assert_eq!(decoded.document_id, message.document_id);
+    assert_eq!(decoded.sender_id, message.sender_id);
+    assert!(matches!(
+        (decoded.operation, message.operation),
+        (
+            CrdtOperation::Text(TextOperation::Insert {
+                left_neighbor: None,
+                right_neighbor: None,
+                value: 'A',
+                ..
+            }),
+            CrdtOperation::Text(TextOperation::Insert {
+                left_neighbor: None,
+                right_neighbor: None,
+                value: 'A',
+                ..
+            })
+        )
+    ));
+}

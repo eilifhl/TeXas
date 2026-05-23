@@ -55,13 +55,6 @@ impl TexasApp {
                         }
 
                         if ui
-                            .add_sized([112.0, 36.0], egui::Button::new("Send test"))
-                            .clicked()
-                        {
-                            self.publish_test_message();
-                        }
-
-                        if ui
                             .add_sized([112.0, 36.0], egui::Button::new("Compile"))
                             .clicked()
                         {
@@ -145,6 +138,7 @@ impl TexasApp {
                         .max_height(editor_size.y)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            let previous_text = self.model.editor_text.clone();
                             let response = ui.add_sized(
                                 [ui.available_width(), editor_size.y],
                                 TextEdit::multiline(&mut self.model.editor_text)
@@ -157,7 +151,8 @@ impl TexasApp {
                             );
 
                             if response.changed() {
-                                self.persist_document();
+                                let next_text = self.model.editor_text.clone();
+                                self.apply_local_editor_change(&previous_text, &next_text);
                             }
                         });
                 });
