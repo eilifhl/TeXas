@@ -22,11 +22,14 @@ pub enum CrdtOperation {
 
 impl CrdtMessage {
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self).context("failed to serialize CRDT message")
+        bincode::serde::encode_to_vec(self, bincode::config::standard())
+            .context("failed to serialize CRDT message")
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
-        serde_json::from_slice(data).context("failed to deserialize CRDT message")
+        let (message, _) = bincode::serde::decode_from_slice(data, bincode::config::standard())
+            .context("failed to deserialize CRDT message")?;
+        Ok(message)
     }
 }
 
