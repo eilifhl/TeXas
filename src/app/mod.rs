@@ -4,13 +4,18 @@ pub mod theme;
 mod ui;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
 use eframe::egui::Context;
 use tokio::runtime::Runtime;
+use uuid::Uuid;
 
+use crate::crdt::message::{CrdtMessage, CrdtOperation};
+use crate::crdt::text_crdt::TextCrdt;
+use crate::crdt::text_crdt::TextOperation;
 use crate::network::{self, DEFAULT_DOCUMENT_TOPIC, NetworkEvent, NetworkHandle};
 use build::run_latexmk;
 use platform::open_path_with_default_app;
@@ -23,7 +28,11 @@ pub struct TexasApp {
 }
 
 struct AppModel {
+    document_id: Uuid,
+    replica_id: Uuid,
+    text_crdt: TextCrdt,
     editor_text: String,
+    document_path: PathBuf,
     output_text: String,
     last_pdf_path: Option<PathBuf>,
     theme_mode: ThemeMode,
@@ -42,14 +51,26 @@ enum AppEffect {
 }
 
 impl AppModel {
-    fn new(theme_mode: ThemeMode) -> Self {
-        Self {
-            editor_text: SAMPLE_DOCUMENT.to_owned(),
+    fn new(theme_mode: ThemeMode) -> Result<Self> {
+        let document_path = default_document_path();
+        let initial_text = load_document(&document_path)?;
+        let document_id = default_document_id();
+        let replica_id = Uuid::new_v4();
+        let mut text_crdt = TextCrdt::new(replica_id);
+        seed_text_crdt(&mut text_crdt, document_id, &initial_text);
+        let editor_text = text_crdt.value();
+
+        Ok(Self {
+            document_id,
+            replica_id,
+            text_crdt,
+            editor_text,
+            document_path,
             output_text: "No build output yet.".to_owned(),
             last_pdf_path: None,
             theme_mode,
             network_status: NetworkStatus::default(),
-        }
+        })
     }
 
     fn apply_build_result(&mut self, result: build::BuildResult) {
@@ -86,7 +107,7 @@ impl TexasApp {
         network.subscribe(DEFAULT_DOCUMENT_TOPIC)?;
 
         Ok(Self {
-            model: AppModel::new(theme_mode),
+            model: AppModel::new(theme_mode)?,
             network,
             _runtime: runtime,
         })
@@ -95,6 +116,15 @@ impl TexasApp {
     pub(crate) fn compile(&mut self) {
         let result = run_latexmk(&self.model.editor_text);
         self.model.apply_build_result(result);
+    }
+
+    pub(crate) fn persist_document(&mut self) {
+        if let Err(error) = save_document(&self.model.document_path, &self.model.editor_text) {
+            self.model.apply_effect(AppEffect::Log(format!(
+                "[editor] failed to save {}: {error}",
+                self.model.document_path.display()
+            )));
+        }
     }
 
     pub(crate) fn open_pdf(&mut self) {
@@ -114,34 +144,53 @@ impl TexasApp {
         }
     }
 
-    pub(crate) fn publish_test_message(&mut self) {
-        let message = format!("test message from {}", self.connection_label());
-        match self
-            .network
-            .publish(DEFAULT_DOCUMENT_TOPIC, message.clone().into_bytes())
-        {
-            Ok(()) => {
-                self.model.apply_effect(AppEffect::Log(format!(
-                    "[network] queued test message: {message}"
-                )));
-            }
-            Err(error) => {
-                self.model.apply_effect(AppEffect::Log(format!(
-                    "[network] failed to queue test message: {error}"
-                )));
-            }
-        }
-    }
-
     pub(crate) fn toggle_theme(&mut self, ctx: &Context) {
         self.model.theme_mode = self.model.theme_mode.toggle();
         configure_theme(ctx, self.model.theme_mode);
     }
 
+    pub(crate) fn apply_local_editor_change(&mut self, previous_text: &str, next_text: &str) {
+        let Some(delta) = diff_text(previous_text, next_text) else {
+            return;
+        };
+
+        let mut operations = Vec::with_capacity(delta.removed_count + delta.inserted.len());
+
+        for offset in (0..delta.removed_count).rev() {
+            let delete_index = delta.prefix_len + offset;
+            let Some(operation) = self.model.text_crdt.delete(delete_index) else {
+                self.model.apply_effect(AppEffect::Log(format!(
+                    "[crdt] failed to delete char at index {delete_index}",
+                )));
+                return;
+            };
+            operations.push(operation);
+        }
+
+        for (offset, value) in delta.inserted.iter().copied().enumerate() {
+            let insert_index = delta.prefix_len + offset;
+            operations.push(self.model.text_crdt.insert(insert_index, value));
+        }
+
+        self.model.editor_text = self.model.text_crdt.value();
+        self.persist_document();
+
+        for operation in operations {
+            self.publish_operation(operation);
+        }
+    }
+
     pub(crate) fn sync_network_state(&mut self) {
         for event in self.network.poll_events() {
-            if let Some(effect) = self.model.apply_network_event(event) {
-                self.model.apply_effect(effect);
+            match event {
+                NetworkEvent::MessageReceived { topic, payload } => {
+                    self.apply_remote_message(&topic, &payload);
+                }
+                other => {
+                    if let Some(effect) = self.model.apply_network_event(other) {
+                        self.model.apply_effect(effect);
+                    }
+                }
             }
         }
     }
@@ -165,6 +214,65 @@ impl TexasApp {
                 "Peer {peer} | {} peer(s)",
                 self.model.network_status.peers.len()
             )
+        }
+    }
+
+    fn apply_remote_message(&mut self, topic: &str, payload: &[u8]) {
+        let message = match CrdtMessage::from_bytes(payload) {
+            Ok(message) => message,
+            Err(error) => {
+                self.model.apply_effect(AppEffect::Log(format!(
+                    "[network] ignored invalid CRDT message on {topic}: {error}",
+                )));
+                return;
+            }
+        };
+
+        if message.sender_id == self.model.replica_id {
+            return;
+        }
+
+        if message.document_id != self.model.document_id {
+            self.model.apply_effect(AppEffect::Log(format!(
+                "[network] ignored message for document {}",
+                short_uuid(message.document_id),
+            )));
+            return;
+        }
+
+        match message.operation {
+            CrdtOperation::Text(operation) => {
+                self.model.text_crdt.apply(operation);
+                let next_text = self.model.text_crdt.value();
+                if next_text != self.model.editor_text {
+                    self.model.editor_text = next_text;
+                    self.persist_document();
+                }
+            }
+        }
+    }
+
+    fn publish_operation(&mut self, operation: TextOperation) {
+        let message = CrdtMessage {
+            document_id: self.model.document_id,
+            sender_id: self.model.replica_id,
+            operation: CrdtOperation::Text(operation),
+        };
+
+        let payload = match message.to_bytes() {
+            Ok(payload) => payload,
+            Err(error) => {
+                self.model.apply_effect(AppEffect::Log(format!(
+                    "[network] failed to serialize CRDT message: {error}",
+                )));
+                return;
+            }
+        };
+
+        if let Err(error) = self.network.publish(DEFAULT_DOCUMENT_TOPIC, payload) {
+            self.model.apply_effect(AppEffect::Log(format!(
+                "[network] failed to publish CRDT operation: {error}",
+            )));
         }
     }
 }
@@ -191,6 +299,85 @@ fn append_output_line(output_text: &str, line: &str) -> String {
 
 fn short_peer_id(peer_id: &str) -> &str {
     peer_id.get(..12).unwrap_or(peer_id)
+}
+
+fn short_uuid(id: Uuid) -> String {
+    id.to_string().chars().take(12).collect()
+}
+
+fn default_document_id() -> Uuid {
+    Uuid::from_u128(1)
+}
+
+fn default_document_path() -> PathBuf {
+    PathBuf::from("main.tex")
+}
+
+fn bootstrap_replica_id(document_id: Uuid) -> Uuid {
+    Uuid::from_u128(document_id.as_u128() ^ 0xB00757A7000000000000000000000000)
+}
+
+fn seed_text_crdt(text_crdt: &mut TextCrdt, document_id: Uuid, text: &str) {
+    let mut bootstrap = TextCrdt::new(bootstrap_replica_id(document_id));
+
+    for (index, value) in text.chars().enumerate() {
+        let operation = bootstrap.insert(index, value);
+        text_crdt.apply(operation);
+    }
+}
+
+struct TextDelta {
+    prefix_len: usize,
+    removed_count: usize,
+    inserted: Vec<char>,
+}
+
+fn diff_text(previous_text: &str, next_text: &str) -> Option<TextDelta> {
+    let previous_chars: Vec<char> = previous_text.chars().collect();
+    let next_chars: Vec<char> = next_text.chars().collect();
+
+    let mut prefix_len = 0;
+    while prefix_len < previous_chars.len()
+        && prefix_len < next_chars.len()
+        && previous_chars[prefix_len] == next_chars[prefix_len]
+    {
+        prefix_len += 1;
+    }
+
+    let mut previous_suffix_start = previous_chars.len();
+    let mut next_suffix_start = next_chars.len();
+    while previous_suffix_start > prefix_len
+        && next_suffix_start > prefix_len
+        && previous_chars[previous_suffix_start - 1] == next_chars[next_suffix_start - 1]
+    {
+        previous_suffix_start -= 1;
+        next_suffix_start -= 1;
+    }
+
+    let removed_count = previous_suffix_start - prefix_len;
+    let inserted = next_chars[prefix_len..next_suffix_start].to_vec();
+
+    if removed_count == 0 && inserted.is_empty() {
+        None
+    } else {
+        Some(TextDelta {
+            prefix_len,
+            removed_count,
+            inserted,
+        })
+    }
+}
+
+fn load_document(path: &Path) -> std::io::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn save_document(path: &Path, contents: &str) -> std::io::Result<()> {
+    fs::write(path, contents)
 }
 
 fn reduce_network_event(
@@ -233,7 +420,8 @@ fn reduce_network_event(
         NetworkEvent::MessageReceived { topic, payload } => (
             status,
             Some(AppEffect::Log(format!(
-                "[network] message on {topic}: {payload}"
+                "[network] message on {topic}: {} byte(s)",
+                payload.len()
             ))),
         ),
         NetworkEvent::Log(message) | NetworkEvent::Error(message) => {
@@ -242,22 +430,47 @@ fn reduce_network_event(
     }
 }
 
-const SAMPLE_DOCUMENT: &str = r#"\documentclass{article}
-\usepackage{amsmath}
-\usepackage{graphicx}
+#[test]
+fn diff_text_detects_single_character_insert() {
+    let delta = diff_text("ab", "acb").expect("text changed");
 
-\title{Barebones TeXas Draft}
-\author{eilif tihi}
-\date{\today}
+    assert_eq!(delta.prefix_len, 1);
+    assert_eq!(delta.removed_count, 0);
+    assert_eq!(delta.inserted, vec!['c']);
+}
 
-\begin{document}
-\maketitle
+#[test]
+fn diff_text_detects_single_character_delete() {
+    let delta = diff_text("acb", "ab").expect("text changed");
 
-\section{Introduction}
-This is a minimal editor shell for drafting LaTeX.
+    assert_eq!(delta.prefix_len, 1);
+    assert_eq!(delta.removed_count, 1);
+    assert!(delta.inserted.is_empty());
+}
 
-\section{Method}
-In the future, you should be able to edit this text in real-time, with a peer-to-peer connection.
+#[test]
+fn diff_text_detects_middle_replacement() {
+    let delta = diff_text("abc", "axc").expect("text changed");
 
-\end{document}
-"#;
+    assert_eq!(delta.prefix_len, 1);
+    assert_eq!(delta.removed_count, 1);
+    assert_eq!(delta.inserted, vec!['x']);
+}
+
+#[test]
+fn deterministic_seed_allows_followup_insert_to_apply_on_other_replica() {
+    let document_id = default_document_id();
+    let initial_text = "Hello";
+
+    let mut alice = TextCrdt::new(Uuid::from_u128(10));
+    let mut bob = TextCrdt::new(Uuid::from_u128(20));
+
+    seed_text_crdt(&mut alice, document_id, initial_text);
+    seed_text_crdt(&mut bob, document_id, initial_text);
+
+    let insert = alice.insert(initial_text.chars().count(), '!');
+    bob.apply(insert);
+
+    assert_eq!(alice.value(), "Hello!");
+    assert_eq!(bob.value(), "Hello!");
+}

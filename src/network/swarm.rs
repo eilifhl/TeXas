@@ -71,9 +71,7 @@ pub async fn run(
                     SwarmEvent::Behaviour(TexasBehaviourEvent::Gossipsub(event)) => {
                         handle_gossipsub_event(event, &events, &repaint).await;
                     }
-                    SwarmEvent::Behaviour(event) => {
-                        emit_event(&events, &repaint, NetworkEvent::Log(format!("{event:?}"))).await;
-                    }
+                    SwarmEvent::Behaviour(TexasBehaviourEvent::Ping(_)) => {}
                     _ => {}
                 }
             }
@@ -97,8 +95,6 @@ pub async fn run(
                             &mut swarm.behaviour_mut().gossipsub,
                             &topic,
                             payload,
-                            &events,
-                            &repaint,
                         )
                         .await
                         {
@@ -180,17 +176,9 @@ async fn publish_message(
     gossipsub: &mut gossipsub::Behaviour,
     topic: &str,
     payload: Vec<u8>,
-    events: &mpsc::Sender<NetworkEvent>,
-    repaint: &RepaintSignal,
 ) -> Result<()> {
     let topic = gossipsub::IdentTopic::new(topic);
-    gossipsub.publish(topic.clone(), payload)?;
-    emit_event(
-        events,
-        repaint,
-        NetworkEvent::Log(format!("published message on {}", topic)),
-    )
-    .await;
+    gossipsub.publish(topic, payload)?;
     Ok(())
 }
 
@@ -201,13 +189,12 @@ async fn handle_gossipsub_event(
 ) {
     match event {
         gossipsub::Event::Message { message, .. } => {
-            let payload = String::from_utf8_lossy(&message.data).into_owned();
             emit_event(
                 events,
                 repaint,
                 NetworkEvent::MessageReceived {
                     topic: message.topic.to_string(),
-                    payload,
+                    payload: message.data,
                 },
             )
             .await;

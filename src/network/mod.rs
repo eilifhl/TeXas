@@ -18,7 +18,7 @@ pub enum NetworkEvent {
     PeerDiscovered(String),
     PeerExpired(String),
     Subscribed(String),
-    MessageReceived { topic: String, payload: String },
+    MessageReceived { topic: String, payload: Vec<u8> },
     Log(String),
     Error(String),
 }
