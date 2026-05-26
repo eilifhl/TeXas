@@ -7,7 +7,10 @@ mod ui;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    mpsc::{self, Receiver, TryRecvError},
+};
 
 use anyhow::Result;
 use eframe::egui::Context;
@@ -17,7 +20,7 @@ use uuid::Uuid;
 use crate::crdt::message::{CrdtMessage, CrdtOperation};
 use crate::crdt::text_crdt::{OperationKnowledge, TextCrdt, TextOperation};
 use crate::network::{self, DEFAULT_DOCUMENT_TOPIC, NetworkEvent, NetworkHandle};
-use build::run_latexmk;
+use build::run_tectonic;
 use platform::open_path_with_default_app;
 use sync::{SyncState, rebuild_text_crdt};
 use theme::{ThemeMode, configure_theme};
@@ -39,6 +42,8 @@ struct AppModel {
     theme_mode: ThemeMode,
     network_status: NetworkStatus,
     sync_state: SyncState,
+    compile_in_progress: bool,
+    compile_result_rx: Option<Receiver<build::BuildResult>>,
 }
 
 #[derive(Clone, Default)]
@@ -73,6 +78,8 @@ impl AppModel {
             theme_mode,
             network_status: NetworkStatus::default(),
             sync_state: SyncState::new(),
+            compile_in_progress: false,
+            compile_result_rx: None,
         })
     }
 
@@ -119,9 +126,24 @@ impl TexasApp {
         Ok(app)
     }
 
-    pub(crate) fn compile(&mut self) {
-        let result = run_latexmk(&self.model.editor_text);
-        self.model.apply_build_result(result);
+    pub(crate) fn compile(&mut self, ctx: &Context) {
+        if self.model.compile_in_progress {
+            return;
+        }
+
+        let editor_text = self.model.editor_text.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        let repaint_ctx = ctx.clone();
+
+        self.model.compile_in_progress = true;
+        self.model.compile_result_rx = Some(result_rx);
+        self.model.output_text = "Compiling with Tectonic...\n On first run, Tectonic may take a while to prepare its bundle.".to_owned();
+
+        std::thread::spawn(move || {
+            let result = run_tectonic(&editor_text);
+            let _ = result_tx.send(result);
+            repaint_ctx.request_repaint();
+        });
     }
 
     pub(crate) fn persist_document(&mut self) {
@@ -415,10 +437,41 @@ impl TexasApp {
             ));
         }
     }
+
+    fn refresh_compile_state(&mut self) {
+        let poll_result = self
+            .model
+            .compile_result_rx
+            .as_ref()
+            .map(|rx| match rx.try_recv() {
+                Ok(result) => Ok(Some(result)),
+                Err(TryRecvError::Empty) => Ok(None),
+                Err(TryRecvError::Disconnected) => Err(()),
+            });
+
+        match poll_result {
+            Some(Ok(Some(result))) => {
+                self.model.compile_in_progress = false;
+                self.model.compile_result_rx = None;
+                self.model.apply_build_result(result);
+            }
+            Some(Ok(None)) => {}
+            Some(Err(())) => {
+                self.model.compile_in_progress = false;
+                self.model.compile_result_rx = None;
+                self.model.output_text =
+                    "Compilation failed:\nThe background compiler thread ended unexpectedly."
+                        .to_owned();
+                self.model.last_pdf_path = None;
+            }
+            None => {}
+        }
+    }
 }
 
 impl eframe::App for TexasApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.refresh_compile_state();
         self.refresh_sync_state();
         self.sync_network_state();
         self.render(ctx);

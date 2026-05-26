@@ -1,18 +1,20 @@
 # TeXas
 > TeX Async Synchronization
 
-TeXas is a proof-of-concept peer-to-peer LaTeX editor written in Rust. It combines a desktop UI built with `egui`, local `latexmk` compilation, and a custom text CRDT replicated over `libp2p` so multiple peers can edit the same document without a central server.
+TeXas is a proof-of-concept peer-to-peer LaTeX editor written in Rust. It combines a desktop UI built with `egui`, local compilation through the `tectonic` Rust library, and a custom text CRDT replicated over `libp2p` so multiple peers can edit the same document without a central server.
 
 ## Current capabilities
 
 - Edit a shared LaTeX document in a native desktop window.
-- Compile the document with 'latexmk' in app.
+- Compile the document in app through the embedded `tectonic` engine.
 - Discover peers on the local network with mDNS and exchange CRDT operations over gossipsub.
 
 ## Requirements
 
 - Rust toolchain with `cargo`
-- A TeX distribution that provides `latexmk`
+- Tectonic native dependencies
+  - macOS with Homebrew: `brew install pkgconf icu4c`
+  - Linux: install the ICU development package for your distribution, for example `libicu-dev` on Debian/Ubuntu
 - A desktop environment capable of opening files with the system default app
   - Linux: `xdg-open`
   - macOS: `open`
@@ -42,7 +44,7 @@ The UI lives in [`src/app`]. It is responsible for:
 
 - rendering the editor and build output panes
 - saving the current buffer to `main.tex`
-- invoking `latexmk`
+- invoking the embedded `tectonic` compiler
 - opening the most recent PDF
 - polling network events and applying remote edits
 

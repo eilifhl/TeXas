@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.102"
 eframe = "0.33.0"
 egui = "0.33.0"
+tectonic = "0.16.9"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
 bincode = { version = "2.0.1", features = ["serde"] }
