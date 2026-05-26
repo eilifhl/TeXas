@@ -82,3 +82,10 @@ Run the test suite with:
 ```bash
 cargo test
 ```
+
+## Inspiration and resources
+We have used several different sources as inspiration and guidance to our implementation:
+- https://martin.kleppmann.com/papers/interleaving-papoc19.pdf
+- https://www.inkandswitch.com/peritext/static/cscw-publication.pdf
+- https://www.youtube.com/watch?v=x7drE24geUw
+- https://arxiv.org/pdf/2310.18220
