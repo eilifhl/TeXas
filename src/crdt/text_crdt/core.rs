@@ -1,7 +1,8 @@
 use crate::crdt::text_crdt::timestamp::Timestamp;
 use crate::crdt::text_crdt::{ElementId, OperationId, TextElement, TextOperation};
+use serde::{Deserialize, Serialize};
 use std::cell::{Cell, Ref, RefCell};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
 
 struct PendingInsert {
@@ -27,6 +28,26 @@ impl PendingInsert {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationKnowledge {
+    known_counters: BTreeMap<Uuid, BTreeSet<Timestamp>>,
+}
+
+impl OperationKnowledge {
+    pub fn observe(&mut self, operation_id: OperationId) {
+        self.known_counters
+            .entry(operation_id.replica_id())
+            .or_default()
+            .insert(operation_id.counter());
+    }
+
+    pub fn contains(&self, operation_id: OperationId) -> bool {
+        self.known_counters
+            .get(&operation_id.replica_id())
+            .is_some_and(|counters| counters.contains(&operation_id.counter()))
+    }
+}
+
 pub struct TextCrdt {
     replica_id: Uuid,
     clock: Timestamp,           // to make the IDs. See the `ElementId` struct
@@ -34,6 +55,8 @@ pub struct TextCrdt {
     ordered_element_indices: RefCell<Vec<usize>>,
     ordered_elements_dirty: Cell<bool>,
     seen_operations: HashSet<OperationId>,
+    applied_operations: Vec<TextOperation>,
+    knowledge: OperationKnowledge,
     pending_inserts: HashMap<ElementId, PendingInsert>,
     pending_deletes: HashSet<ElementId>,
     #[cfg(test)]
@@ -49,11 +72,21 @@ impl TextCrdt {
             ordered_element_indices: RefCell::new(Vec::new()),
             ordered_elements_dirty: Cell::new(true),
             seen_operations: HashSet::new(),
+            applied_operations: Vec::new(),
+            knowledge: OperationKnowledge::default(),
             pending_inserts: HashMap::new(),
             pending_deletes: HashSet::new(),
             #[cfg(test)]
             ordered_elements_rebuilds: Cell::new(0),
         }
+    }
+
+    pub fn from_operations(replica_id: Uuid, operations: &[TextOperation]) -> Self {
+        let mut text_crdt = Self::new(replica_id);
+        for operation in operations.iter().cloned() {
+            text_crdt.apply(operation);
+        }
+        text_crdt
     }
 
     // Insertions and deletions create TextOperations that we apply locally
@@ -95,6 +128,8 @@ impl TextCrdt {
     }
 
     pub fn apply(&mut self, op: TextOperation) {
+        let operation_id = op.operation_id();
+
         match op {
             TextOperation::Insert {
                 op_id,
@@ -111,6 +146,14 @@ impl TextCrdt {
                 }
 
                 self.seen_operations.insert(op_id);
+                self.applied_operations.push(TextOperation::Insert {
+                    op_id,
+                    element_id,
+                    left_neighbor,
+                    right_neighbor,
+                    value,
+                });
+                self.knowledge.observe(operation_id);
 
                 if self.element_exists(element_id) || self.pending_inserts.contains_key(&element_id)
                 {
@@ -137,6 +180,9 @@ impl TextCrdt {
                 }
 
                 self.seen_operations.insert(op_id);
+                self.applied_operations
+                    .push(TextOperation::Delete { op_id, element_id });
+                self.knowledge.observe(operation_id);
 
                 if let Some(element) = self
                     .elements
@@ -159,6 +205,22 @@ impl TextCrdt {
 
                 (!element.deleted()).then_some(element.value())
             })
+            .collect()
+    }
+
+    pub fn applied_operations(&self) -> &[TextOperation] {
+        &self.applied_operations
+    }
+
+    pub fn knowledge(&self) -> OperationKnowledge {
+        self.knowledge.clone()
+    }
+
+    pub fn missing_operations(&self, knowledge: &OperationKnowledge) -> Vec<TextOperation> {
+        self.applied_operations
+            .iter()
+            .filter(|operation| !knowledge.contains(operation.operation_id()))
+            .cloned()
             .collect()
     }
 
@@ -515,6 +577,60 @@ fn insert_with_existing_element_id_is_ignored_even_with_new_operation_id() {
 
     assert_eq!(text_crdt.elements.len(), 1);
     assert_eq!(text_crdt.value(), "A");
+}
+
+#[test]
+fn rebuilding_from_applied_operations_recreates_the_same_state() {
+    let replica_a = Uuid::from_u128(1);
+    let replica_b = Uuid::from_u128(2);
+    let mut source = TextCrdt::new(replica_a);
+
+    let insert_a = source.insert(0, 'A');
+    let insert_b = source.insert(1, 'B');
+    let insert_c = source.insert(2, 'C');
+    let delete_b = source
+        .delete(1)
+        .expect("inserted element should be deletable");
+
+    let concurrent_insert = TextOperation::Insert {
+        op_id: OperationId::new(replica_b, Timestamp::zero().next()),
+        element_id: ElementId::new(replica_b, Timestamp::zero().next()),
+        left_neighbor: Some(match insert_a {
+            TextOperation::Insert { element_id, .. } => element_id,
+            TextOperation::Delete { .. } => unreachable!("insert_a is an insert"),
+        }),
+        right_neighbor: Some(match insert_c {
+            TextOperation::Insert { element_id, .. } => element_id,
+            TextOperation::Delete { .. } => unreachable!("insert_c is an insert"),
+        }),
+        value: 'X',
+    };
+
+    source.apply(concurrent_insert);
+    source.apply(delete_b);
+
+    let rebuilt = TextCrdt::from_operations(Uuid::from_u128(99), source.applied_operations());
+
+    assert_eq!(source.value(), rebuilt.value());
+    assert_eq!(source.knowledge(), rebuilt.knowledge());
+    assert!(matches!(insert_b, TextOperation::Insert { .. }));
+}
+
+#[test]
+fn missing_operations_uses_exact_operation_knowledge() {
+    let replica_id = Uuid::from_u128(1);
+    let mut text_crdt = TextCrdt::new(replica_id);
+
+    let first = text_crdt.insert(0, 'A');
+    let second = text_crdt.insert(1, 'B');
+
+    let mut sparse_knowledge = OperationKnowledge::default();
+    sparse_knowledge.observe(second.operation_id());
+
+    let missing = text_crdt.missing_operations(&sparse_knowledge);
+
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].operation_id(), first.operation_id());
 }
 
 #[test]

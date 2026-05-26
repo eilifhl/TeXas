@@ -17,6 +17,10 @@ impl OperationId {
         }
     }
 
+    pub fn replica_id(self) -> Uuid {
+        self.replica_id
+    }
+
     pub fn counter(self) -> Timestamp {
         self.counter
     }
@@ -36,4 +40,12 @@ pub enum TextOperation {
         op_id: OperationId,
         element_id: ElementId,
     },
+}
+
+impl TextOperation {
+    pub fn operation_id(&self) -> OperationId {
+        match self {
+            Self::Insert { op_id, .. } | Self::Delete { op_id, .. } => *op_id,
+        }
+    }
 }
