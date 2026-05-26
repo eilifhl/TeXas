@@ -249,6 +249,7 @@ impl TexasApp {
                     self.persist_document();
                 }
             }
+            CrdtOperation::SyncRequest { .. } | CrdtOperation::SyncResponse { .. } => {}
         }
     }
 
