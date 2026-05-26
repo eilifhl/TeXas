@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{env, path::Path};
 
 pub fn open_path_with_default_app(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
