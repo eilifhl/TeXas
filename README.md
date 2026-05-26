@@ -1,6 +1,11 @@
 # TeXas
 > TeX Async Synchronization
 
+![Release](https://img.shields.io/github/v/release/eilifhl/TeXas)
+![License](https://img.shields.io/badge/license-GPLv3-green)
+![Rust](https://img.shields.io/badge/Rust-1.82+-blue.svg)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+
 TeXas is a proof-of-concept peer-to-peer LaTeX editor written in Rust. It combines a desktop UI built with `egui`, local compilation through the `tectonic` Rust library, and a custom text CRDT replicated over `libp2p` so multiple peers can edit the same document without a central server.
 
 ## Current capabilities
