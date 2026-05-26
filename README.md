@@ -24,6 +24,12 @@ TeXas is a proof-of-concept peer-to-peer LaTeX editor written in Rust. It combin
 cargo run
 ```
 
+
+If you experience issues running under Wayland, try running under Xwayland:
+```bash
+env -u WAYLAND_DISPLAY cargo run
+```
+
 ## Testing the application
 
 The application can be tested by running two instances on the same computer. The instances will discover one another over mDns.
