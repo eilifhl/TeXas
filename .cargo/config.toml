@@ -1,4 +1,4 @@
 [env]
 # Tectonic's ICU bridge uses pkg-config. Homebrew keeps icu4c keg-only on
 # macOS, so Cargo needs the pkgconfig directory added explicitly.
-PKG_CONFIG_PATH = { value = "/opt/homebrew/opt/icu4c/lib/pkgconfig:/opt/homebrew/opt/icu4c@78/lib/pkgconfig:/usr/local/opt/icu4c/lib/pkgconfig:/usr/local/opt/icu4c@78/lib/pkgconfig" }
+PKG_CONFIG_PATH = { value = "/opt/homebrew/opt/icu4c/lib/pkgconfig:/usr/local/opt/icu4c/lib/pkgconfig" }
