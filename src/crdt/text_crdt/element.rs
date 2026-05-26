@@ -2,7 +2,6 @@ use crate::crdt::text_crdt::timestamp::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextElement {
     id: ElementId,
@@ -11,7 +10,6 @@ pub struct TextElement {
     value: char, // the text char itself
     deleted: bool,
 }
-
 
 impl TextElement {
     pub fn new(

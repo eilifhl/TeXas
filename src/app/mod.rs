@@ -1,5 +1,6 @@
 pub mod build;
 pub mod platform;
+mod sync;
 pub mod theme;
 mod ui;
 
@@ -14,11 +15,11 @@ use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 use crate::crdt::message::{CrdtMessage, CrdtOperation};
-use crate::crdt::text_crdt::TextCrdt;
-use crate::crdt::text_crdt::TextOperation;
+use crate::crdt::text_crdt::{OperationKnowledge, TextCrdt, TextOperation};
 use crate::network::{self, DEFAULT_DOCUMENT_TOPIC, NetworkEvent, NetworkHandle};
 use build::run_latexmk;
 use platform::open_path_with_default_app;
+use sync::{SyncState, rebuild_text_crdt};
 use theme::{ThemeMode, configure_theme};
 
 pub struct TexasApp {
@@ -37,6 +38,7 @@ struct AppModel {
     last_pdf_path: Option<PathBuf>,
     theme_mode: ThemeMode,
     network_status: NetworkStatus,
+    sync_state: SyncState,
 }
 
 #[derive(Clone, Default)]
@@ -70,6 +72,7 @@ impl AppModel {
             last_pdf_path: None,
             theme_mode,
             network_status: NetworkStatus::default(),
+            sync_state: SyncState::new(),
         })
     }
 
@@ -106,11 +109,14 @@ impl TexasApp {
         let network = network::start(runtime.handle(), repaint_signal)?;
         network.subscribe(DEFAULT_DOCUMENT_TOPIC)?;
 
-        Ok(Self {
+        let mut app = Self {
             model: AppModel::new(theme_mode)?,
             network,
             _runtime: runtime,
-        })
+        };
+        app.request_document_sync("startup");
+
+        Ok(app)
     }
 
     pub(crate) fn compile(&mut self) {
@@ -154,6 +160,8 @@ impl TexasApp {
             return;
         };
 
+        self.model.sync_state.mark_local_edit();
+
         let mut operations = Vec::with_capacity(delta.removed_count + delta.inserted.len());
 
         for offset in (0..delta.removed_count).rev() {
@@ -186,6 +194,18 @@ impl TexasApp {
                 NetworkEvent::MessageReceived { topic, payload } => {
                     self.apply_remote_message(&topic, &payload);
                 }
+                NetworkEvent::PeerDiscovered(peer_id) => {
+                    if self.model.sync_state.should_accept_authoritative_sync() {
+                        self.request_document_sync("peer discovered");
+                    }
+
+                    if let Some(effect) = self
+                        .model
+                        .apply_network_event(NetworkEvent::PeerDiscovered(peer_id))
+                    {
+                        self.model.apply_effect(effect);
+                    }
+                }
                 other => {
                     if let Some(effect) = self.model.apply_network_event(other) {
                         self.model.apply_effect(effect);
@@ -217,6 +237,10 @@ impl TexasApp {
         }
     }
 
+    pub(crate) fn editor_locked(&self) -> bool {
+        self.model.sync_state.editor_locked()
+    }
+
     fn apply_remote_message(&mut self, topic: &str, payload: &[u8]) {
         let message = match CrdtMessage::from_bytes(payload) {
             Ok(message) => message,
@@ -242,28 +266,128 @@ impl TexasApp {
 
         match message.operation {
             CrdtOperation::Text(operation) => {
-                self.model.text_crdt.apply(operation);
-                let next_text = self.model.text_crdt.value();
-                if next_text != self.model.editor_text {
-                    self.model.editor_text = next_text;
-                    self.persist_document();
+                if self.model.sync_state.should_buffer_remote_operations() {
+                    self.model.sync_state.buffer_remote_operation(operation);
+                } else {
+                    self.apply_text_operation(operation);
                 }
+            }
+            CrdtOperation::SyncRequest { known_operations } => {
+                self.respond_to_sync_request(message.sender_id, known_operations);
+            }
+            CrdtOperation::SyncResponse {
+                target_replica_id,
+                operations,
+            } => {
+                if target_replica_id != self.model.replica_id {
+                    return;
+                }
+
+                self.apply_sync_response(message.sender_id, operations);
             }
         }
     }
 
     fn publish_operation(&mut self, operation: TextOperation) {
-        let message = CrdtMessage {
-            document_id: self.model.document_id,
-            sender_id: self.model.replica_id,
-            operation: CrdtOperation::Text(operation),
-        };
+        self.publish_message(
+            CrdtMessage {
+                document_id: self.model.document_id,
+                sender_id: self.model.replica_id,
+                operation: CrdtOperation::Text(operation),
+            },
+            "CRDT operation",
+        );
+    }
 
+    fn apply_text_operation(&mut self, operation: TextOperation) {
+        self.model.text_crdt.apply(operation);
+        let next_text = self.model.text_crdt.value();
+        if next_text != self.model.editor_text {
+            self.model.editor_text = next_text;
+            self.persist_document();
+        }
+    }
+
+    fn request_document_sync(&mut self, reason: &str) {
+        if !self.model.sync_state.should_accept_authoritative_sync() {
+            return;
+        }
+
+        self.model.sync_state.mark_bootstrap_requested();
+        self.publish_message(
+            CrdtMessage {
+                document_id: self.model.document_id,
+                sender_id: self.model.replica_id,
+                operation: CrdtOperation::SyncRequest {
+                    known_operations: OperationKnowledge::default(),
+                },
+            },
+            "document sync request",
+        );
+        self.model.apply_effect(AppEffect::Log(format!(
+            "[sync] requested authoritative document sync ({reason})"
+        )));
+    }
+
+    fn respond_to_sync_request(
+        &mut self,
+        requester_id: Uuid,
+        known_operations: OperationKnowledge,
+    ) {
+        if !self.model.sync_state.can_serve_sync_requests() {
+            return;
+        }
+
+        let operations = self.model.text_crdt.missing_operations(&known_operations);
+        let operation_count = operations.len();
+        self.publish_message(
+            CrdtMessage {
+                document_id: self.model.document_id,
+                sender_id: self.model.replica_id,
+                operation: CrdtOperation::SyncResponse {
+                    target_replica_id: requester_id,
+                    operations,
+                },
+            },
+            "document sync response",
+        );
+        self.model.apply_effect(AppEffect::Log(format!(
+            "[sync] shared {operation_count} operation(s) with {}",
+            short_uuid(requester_id),
+        )));
+    }
+
+    fn apply_sync_response(&mut self, sender_id: Uuid, operations: Vec<TextOperation>) {
+        if !self.model.sync_state.should_accept_authoritative_sync() {
+            return;
+        }
+
+        let buffered_remote_operations = self.model.sync_state.take_buffered_remote_operations();
+        let next_crdt = rebuild_text_crdt(
+            self.model.replica_id,
+            &operations,
+            &buffered_remote_operations,
+        );
+        let next_text = next_crdt.value();
+
+        self.model.text_crdt = next_crdt;
+        self.model.editor_text = next_text;
+        self.model.sync_state.mark_authoritative_sync_applied();
+        self.persist_document();
+        self.model.apply_effect(AppEffect::Log(format!(
+            "[sync] applied {} authoritative operation(s) from {} and replayed {} buffered operation(s)",
+            operations.len(),
+            short_uuid(sender_id),
+            buffered_remote_operations.len()
+        )));
+    }
+
+    fn publish_message(&mut self, message: CrdtMessage, label: &str) {
         let payload = match message.to_bytes() {
             Ok(payload) => payload,
             Err(error) => {
                 self.model.apply_effect(AppEffect::Log(format!(
-                    "[network] failed to serialize CRDT message: {error}",
+                    "[network] failed to serialize {label}: {error}",
                 )));
                 return;
             }
@@ -271,14 +395,31 @@ impl TexasApp {
 
         if let Err(error) = self.network.publish(DEFAULT_DOCUMENT_TOPIC, payload) {
             self.model.apply_effect(AppEffect::Log(format!(
-                "[network] failed to publish CRDT operation: {error}",
+                "[network] failed to publish {label}: {error}",
             )));
+        }
+    }
+
+    fn refresh_sync_state(&mut self) {
+        if let Some(buffered_remote_operations) =
+            self.model.sync_state.finish_bootstrap_if_timed_out()
+        {
+            let operation_count = buffered_remote_operations.len();
+            for operation in buffered_remote_operations {
+                self.apply_text_operation(operation);
+            }
+            self.model.apply_effect(AppEffect::Log(
+                format!(
+                    "[sync] no authoritative peer answered in time; using local document with {operation_count} buffered operation(s)"
+                ),
+            ));
         }
     }
 }
 
 impl eframe::App for TexasApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.refresh_sync_state();
         self.sync_network_state();
         self.render(ctx);
     }

@@ -1,12 +1,11 @@
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
 use libp2p::futures::StreamExt;
 use libp2p::{Multiaddr, PeerId, gossipsub, mdns, noise, ping, swarm::SwarmEvent, tcp, yamux};
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
 use crate::network::{
-    RepaintSignal,
-    NetworkCommand, NetworkEvent,
+    NetworkCommand, NetworkEvent, RepaintSignal,
     texas_behaviour::{TexasBehaviour, TexasBehaviourEvent},
 };
 
@@ -136,8 +135,12 @@ async fn handle_mdns_event(
 
                 if is_new_peer {
                     gossipsub.add_explicit_peer(&peer_id);
-                    emit_event(events, repaint, NetworkEvent::PeerDiscovered(peer_id.to_string()))
-                        .await;
+                    emit_event(
+                        events,
+                        repaint,
+                        NetworkEvent::PeerDiscovered(peer_id.to_string()),
+                    )
+                    .await;
                 }
             }
         }
@@ -152,8 +155,12 @@ async fn handle_mdns_event(
                 if known_addresses.is_empty() {
                     mdns_peers.remove(&peer_id);
                     gossipsub.remove_explicit_peer(&peer_id);
-                    emit_event(events, repaint, NetworkEvent::PeerExpired(peer_id.to_string()))
-                        .await;
+                    emit_event(
+                        events,
+                        repaint,
+                        NetworkEvent::PeerExpired(peer_id.to_string()),
+                    )
+                    .await;
                 }
             }
         }
@@ -211,12 +218,8 @@ async fn emit_event(
     event: NetworkEvent,
 ) {
     let queued = match event {
-        NetworkEvent::Log(message) => {
-            events.try_send(NetworkEvent::Log(message)).is_ok()
-        }
-        other => {
-            events.send(other).await.is_ok()
-        }
+        NetworkEvent::Log(message) => events.try_send(NetworkEvent::Log(message)).is_ok(),
+        other => events.send(other).await.is_ok(),
     };
 
     if queued {
