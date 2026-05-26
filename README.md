@@ -57,6 +57,8 @@ The CRDT implementation lives in [`src/crdt`]. It is a text sequence CRDT with:
 - tombstone-based deletes
 - buffering for inserts that arrive before their dependencies
 
+More info about the CRDT [here](CRDT.md).
+
 ## Limitations
 
 TeXas is not a finished collaborative editor yet. The current implementation has some important constraints:
