@@ -86,6 +86,7 @@ TeXas is not a finished collaborative editor yet. The current implementation has
 - Only one document is supported, and it is hardcoded to `main.tex`.
 - Collaboration is currently aimed at peers on the same local network discovered through mDNS.
 - There is no access control, persistence layer for collaborative sessions, or document/session management yet.
+- Undo and redo are not implemented.
 
 ## Development
 
