@@ -208,10 +208,12 @@ impl TextCrdt {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn applied_operations(&self) -> &[TextOperation] {
         &self.applied_operations
     }
 
+    #[cfg(test)]
     pub fn knowledge(&self) -> OperationKnowledge {
         self.knowledge.clone()
     }

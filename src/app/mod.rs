@@ -1,5 +1,6 @@
 pub mod build;
 pub mod platform;
+mod sync;
 pub mod theme;
 mod ui;
 
@@ -7,7 +8,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use eframe::egui::Context;
@@ -19,9 +19,8 @@ use crate::crdt::text_crdt::{OperationKnowledge, TextCrdt, TextOperation};
 use crate::network::{self, DEFAULT_DOCUMENT_TOPIC, NetworkEvent, NetworkHandle};
 use build::run_latexmk;
 use platform::open_path_with_default_app;
+use sync::{SyncState, rebuild_text_crdt};
 use theme::{ThemeMode, configure_theme};
-
-const BOOTSTRAP_SYNC_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct TexasApp {
     model: AppModel,
@@ -47,84 +46,6 @@ struct NetworkStatus {
     local_peer_id: Option<String>,
     listen_addr: Option<String>,
     peers: HashSet<String>,
-}
-
-struct SyncState {
-    bootstrap_deadline: Instant,
-    bootstrap_requested: bool,
-    authoritative_sync_applied: bool,
-    local_state_is_authoritative: bool,
-    local_edits_since_startup: bool,
-    buffered_remote_operations: Vec<TextOperation>,
-}
-
-impl SyncState {
-    fn new() -> Self {
-        Self {
-            bootstrap_deadline: Instant::now() + BOOTSTRAP_SYNC_TIMEOUT,
-            bootstrap_requested: false,
-            authoritative_sync_applied: false,
-            local_state_is_authoritative: false,
-            local_edits_since_startup: false,
-            buffered_remote_operations: Vec::new(),
-        }
-    }
-
-    fn should_accept_authoritative_sync(&self) -> bool {
-        !self.authoritative_sync_applied
-            && !self.local_state_is_authoritative
-            && !self.local_edits_since_startup
-    }
-
-    fn editor_locked(&self) -> bool {
-        self.should_accept_authoritative_sync() && Instant::now() < self.bootstrap_deadline
-    }
-
-    fn can_serve_sync_requests(&self) -> bool {
-        self.authoritative_sync_applied
-            || self.local_state_is_authoritative
-            || self.local_edits_since_startup
-    }
-
-    fn should_buffer_remote_operations(&self) -> bool {
-        self.bootstrap_requested && self.should_accept_authoritative_sync()
-    }
-
-    fn mark_bootstrap_requested(&mut self) {
-        self.bootstrap_requested = true;
-    }
-
-    fn mark_authoritative_sync_applied(&mut self) {
-        self.bootstrap_requested = false;
-        self.authoritative_sync_applied = true;
-        self.buffered_remote_operations.clear();
-    }
-
-    fn mark_local_edit(&mut self) {
-        self.bootstrap_requested = false;
-        self.local_edits_since_startup = true;
-        self.local_state_is_authoritative = true;
-        self.buffered_remote_operations.clear();
-    }
-
-    fn buffer_remote_operation(&mut self, operation: TextOperation) {
-        self.buffered_remote_operations.push(operation);
-    }
-
-    fn take_buffered_remote_operations(&mut self) -> Vec<TextOperation> {
-        std::mem::take(&mut self.buffered_remote_operations)
-    }
-
-    fn mark_local_state_authoritative_if_timed_out(&mut self) -> bool {
-        if self.should_accept_authoritative_sync() && Instant::now() >= self.bootstrap_deadline {
-            self.bootstrap_requested = false;
-            self.local_state_is_authoritative = true;
-            self.buffered_remote_operations.clear();
-            true
-        } else {
-            false
-        }
-    }
 }
 
 enum AppEffect {
@@ -480,13 +401,17 @@ impl TexasApp {
     }
 
     fn refresh_sync_state(&mut self) {
-        if self
-            .model
-            .sync_state
-            .mark_local_state_authoritative_if_timed_out()
+        if let Some(buffered_remote_operations) =
+            self.model.sync_state.finish_bootstrap_if_timed_out()
         {
+            let operation_count = buffered_remote_operations.len();
+            for operation in buffered_remote_operations {
+                self.apply_text_operation(operation);
+            }
             self.model.apply_effect(AppEffect::Log(
-                "[sync] no authoritative peer answered in time; using local document".to_owned(),
+                format!(
+                    "[sync] no authoritative peer answered in time; using local document with {operation_count} buffered operation(s)"
+                ),
             ));
         }
     }
@@ -540,18 +465,6 @@ fn seed_text_crdt(text_crdt: &mut TextCrdt, document_id: Uuid, text: &str) {
         let operation = bootstrap.insert(index, value);
         text_crdt.apply(operation);
     }
-}
-
-fn rebuild_text_crdt(
-    replica_id: Uuid,
-    authoritative_operations: &[TextOperation],
-    buffered_remote_operations: &[TextOperation],
-) -> TextCrdt {
-    let mut text_crdt = TextCrdt::from_operations(replica_id, authoritative_operations);
-    for operation in buffered_remote_operations.iter().cloned() {
-        text_crdt.apply(operation);
-    }
-    text_crdt
 }
 
 struct TextDelta {
@@ -701,26 +614,4 @@ fn deterministic_seed_allows_followup_insert_to_apply_on_other_replica() {
 
     assert_eq!(alice.value(), "Hello!");
     assert_eq!(bob.value(), "Hello!");
-}
-
-#[test]
-fn bootstrap_sync_replaces_local_seed_and_replays_buffered_remote_operations() {
-    let document_id = default_document_id();
-
-    let mut local = TextCrdt::new(Uuid::from_u128(10));
-    seed_text_crdt(&mut local, document_id, "Old");
-
-    let mut remote = TextCrdt::new(Uuid::from_u128(20));
-    seed_text_crdt(&mut remote, document_id, "Hello");
-    let authoritative_operations = remote.applied_operations().to_vec();
-    let buffered_remote_operation = remote.insert(5, '!');
-
-    let rebuilt = rebuild_text_crdt(
-        Uuid::from_u128(30),
-        &authoritative_operations,
-        std::slice::from_ref(&buffered_remote_operation),
-    );
-
-    assert_eq!(local.value(), "Old");
-    assert_eq!(rebuilt.value(), remote.value());
 }
