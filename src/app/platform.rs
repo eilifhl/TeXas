@@ -1,4 +1,4 @@
-use std::{env, fs, path::Path};
+use std::path::Path;
 
 pub fn open_path_with_default_app(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
@@ -43,6 +43,8 @@ pub fn open_path_with_default_app(path: &Path) -> std::io::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn discover_wayland_display() -> Option<String> {
+    use std::{env, fs};
+
     let runtime_dir = env::var_os("XDG_RUNTIME_DIR")?;
     let mut candidates = fs::read_dir(runtime_dir)
         .ok()?

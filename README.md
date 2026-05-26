@@ -12,6 +12,9 @@ TeXas is a proof-of-concept peer-to-peer LaTeX editor written in Rust. It combin
 ## Requirements
 
 - Rust toolchain with `cargo`
+- Tectonic native dependencies
+  - macOS with Homebrew: `brew install pkgconf icu4c`
+  - Linux: install the ICU development package for your distribution, for example `libicu-dev` on Debian/Ubuntu
 - A desktop environment capable of opening files with the system default app
   - Linux: `xdg-open`
   - macOS: `open`
