@@ -1,7 +1,6 @@
 use std::{
     env, fs,
     path::PathBuf,
-    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -10,7 +9,7 @@ pub struct BuildResult {
     pub pdf_path: Option<PathBuf>,
 }
 
-pub fn run_latexmk(editor_text: &str) -> BuildResult {
+pub fn run_tectonic(editor_text: &str) -> BuildResult {
     let build_dir = match create_build_dir() {
         Ok(path) => path,
         Err(error) => {
@@ -29,69 +28,40 @@ pub fn run_latexmk(editor_text: &str) -> BuildResult {
         };
     }
 
-    let output = match Command::new("latexmk")
-        .args([
-            "-pdf",
-            "-interaction=nonstopmode",
-            "-halt-on-error",
-            "main.tex",
-        ])
-        .current_dir(&build_dir)
-        .output()
-    {
-        Ok(output) => output,
+    let mut text = String::new();
+    text.push_str("$ tectonic::latex_to_pdf(main.tex)\n");
+    text.push_str(&format!("Working directory: {}\n\n", build_dir.display()));
+
+    let pdf_path = build_dir.join("main.pdf");
+    let pdf_bytes = match tectonic::latex_to_pdf(editor_text) {
+        Ok(pdf_bytes) => pdf_bytes,
         Err(error) => {
+            text.push_str(&format!("Compilation failed:\n{error}\n"));
             return BuildResult {
-                output: format!("Failed to run latexmk in {}:\n{error}", build_dir.display()),
+                output: text,
                 pdf_path: None,
             };
         }
     };
 
-    let mut text = String::new();
-    text.push_str("$ latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex\n");
-    text.push_str(&format!("Working directory: {}\n\n", build_dir.display()));
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        text.push_str(&stdout);
-        if !stdout.ends_with('\n') {
-            text.push('\n');
-        }
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.trim().is_empty() {
-        if !text.ends_with('\n') {
-            text.push('\n');
-        }
-        text.push_str("[stderr]\n");
-        text.push_str(&stderr);
-        if !stderr.ends_with('\n') {
-            text.push('\n');
-        }
-    }
-
-    text.push_str(&format!(
-        "\nExit status: {}\n",
-        output
-            .status
-            .code()
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "terminated by signal".to_owned())
-    ));
-
-    let pdf_path = build_dir.join("main.pdf");
-    if pdf_path.exists() {
-        text.push_str(&format!("PDF: {}\n", pdf_path.display()));
-        BuildResult {
-            output: text,
-            pdf_path: Some(pdf_path),
-        }
-    } else {
+    if let Err(error) = fs::write(&pdf_path, &pdf_bytes) {
+        text.push_str(&format!(
+            "Compilation succeeded, but failed to write {}:\n{error}\n",
+            pdf_path.display()
+        ));
         BuildResult {
             output: text,
             pdf_path: None,
+        }
+    } else {
+        text.push_str(&format!(
+            "Compilation succeeded.\nOutput PDF size: {} bytes\nPDF: {}\n",
+            pdf_bytes.len(),
+            pdf_path.display()
+        ));
+        BuildResult {
+            output: text,
+            pdf_path: Some(pdf_path),
         }
     }
 }

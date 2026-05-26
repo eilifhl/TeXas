@@ -3,7 +3,7 @@ use eframe::egui::{
     Stroke, TextEdit, TopBottomPanel,
 };
 
-use super::{theme::palette, theme::ThemeMode, TexasApp};
+use super::{TexasApp, theme::ThemeMode, theme::palette};
 
 impl TexasApp {
     pub(super) fn render(&mut self, ctx: &Context) {
@@ -55,10 +55,17 @@ impl TexasApp {
                         }
 
                         if ui
-                            .add_sized([112.0, 36.0], egui::Button::new("Compile"))
+                            .add_enabled(
+                                !self.model.compile_in_progress,
+                                egui::Button::new(if self.model.compile_in_progress {
+                                    "Compiling..."
+                                } else {
+                                    "Compile"
+                                }),
+                            )
                             .clicked()
                         {
-                            self.compile();
+                            self.compile(ctx);
                         }
                     });
                 });
