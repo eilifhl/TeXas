@@ -122,7 +122,15 @@ impl TexasApp {
                         .strong()
                         .color(colors.title_color),
                 );
+                if self.editor_locked() {
+                    ui.label(
+                        RichText::new("Waiting briefly for session sync before enabling editing.")
+                            .small()
+                            .color(colors.label_color),
+                    );
+                }
                 ui.add_space(8.0);
+                let editor_locked = self.editor_locked();
 
                 let editor_frame = Frame::new()
                     .fill(colors.panel_fill)
@@ -146,6 +154,7 @@ impl TexasApp {
                                     .desired_rows(30)
                                     .font(egui::TextStyle::Monospace)
                                     .frame(false)
+                                    .interactive(!editor_locked)
                                     .hint_text("Start writing LaTeX here...")
                                     .text_color(colors.text_color),
                             );
