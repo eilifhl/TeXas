@@ -36,6 +36,18 @@ env -u WAYLAND_DISPLAY cargo run
 
 The application can be tested by running two instances on the same computer. The instances will discover one another over mDns.
 
+## Dependencies
+
+- `anyhow`: used for ergonomic error handling and propagating application errors.
+- `eframe`: provides the native desktop application framework used to run the GUI.
+- `egui`: used to build the editor interface and the rest of the user interface.
+- `tectonic`: used to compile LaTeX source into PDF directly inside the application.
+- `uuid`: used to generate unique identifiers for replicas and messages.
+- `serde`: used to serialize and deserialize the project's data structures.
+- `bincode`: used for compact binary encoding of messages sent over the network.
+- `tokio`: provides the async runtime used for networking and background tasks.
+- `libp2p`: used for peer-to-peer communication, including TCP transport, mDNS peer discovery, Noise encryption, Yamux multiplexing, and gossipsub messaging.
+
 ## Architecture
 
 ### App layer
