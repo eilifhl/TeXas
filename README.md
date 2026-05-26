@@ -32,9 +32,19 @@ If you experience issues running under Wayland, try running under Xwayland:
 env -u WAYLAND_DISPLAY cargo run
 ```
 
-## Testing the application
+## How to use the program
 
-The application can be tested by running two instances on the same computer. The instances will discover one another over mDns.
+Start the application with `cargo run`. Write or edit LaTeX in the editor pane, then compile the document to generate a PDF. The generated PDF can be opened from the application in the system's default PDF viewer.
+
+To test collaboration with multiple people, run the application on two or more computers connected to the same local network. Each user opens the program, and the instances should discover each other automatically through mDNS. When one user edits the shared document, the changes should be synchronized to the other users.
+
+## Development and testing
+
+Run the test suite with:
+
+```bash
+cargo test
+```
 
 ## Dependencies
 
@@ -87,14 +97,6 @@ TeXas is not a finished collaborative editor yet. The current implementation has
 - Collaboration is currently aimed at peers on the same local network discovered through mDNS.
 - There is no access control, persistence layer for collaborative sessions, or document/session management yet.
 - Undo and redo are not implemented.
-
-## Development
-
-Run the test suite with:
-
-```bash
-cargo test
-```
 
 ## Inspiration and resources
 We have used several different sources as inspiration and guidance to our implementation:
